@@ -1,0 +1,6 @@
+{
+  "name": "City Companion Admin",
+  "description": "Full-stack editorial CMS dashboard for managing City Companion cities, categories, places, local services, trips, and community tips.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

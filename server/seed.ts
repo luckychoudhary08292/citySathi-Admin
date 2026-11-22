@@ -1,0 +1,449 @@
+import type {
+  CategoryDoc,
+  CityDoc,
+  PlaceDoc,
+  ServiceDoc,
+  TipDoc,
+  TripDoc,
+} from '../src/types.ts';
+import { FIXED_CATEGORIES } from '../src/types.ts';
+
+export interface SeedDatabaseState {
+  cities: CityDoc[];
+  categories: CategoryDoc[];
+  cityCollections: Record<string, Array<PlaceDoc | ServiceDoc>>;
+  trips: TripDoc[];
+  tips: TipDoc[];
+  adminConfig?: {
+    email: string;
+    passwordHash: string;
+    createdAt: number;
+  };
+}
+
+export function buildDefaultCategoriesForCity(cityId: string): CategoryDoc[] {
+  return FIXED_CATEGORIES.map((cat) => ({
+    id: `${cityId}_${cat.category.toLowerCase()}`,
+    cityId,
+    category: cat.category,
+    title: cat.title,
+    subCategories: [...cat.defaultSubs],
+  }));
+}
+
+export function createInitialSeedData(): SeedDatabaseState {
+  const now = Date.now();
+  const indoreCities: CityDoc = {
+    id: 'indore',
+    name: 'Indore',
+    state: 'Madhya Pradesh',
+    latitude: 22.7196,
+    longitude: 75.8577,
+    heroImageUrl: '/src/assets/images/indore_city_hero_1795363554899.jpg',
+    collectionName: 'city_indore',
+    heroSubtitle: 'Cleanest City & Culinary Capital of Central India',
+    promoBanner: {
+      id: 'indore_sarafa_night',
+      badgeText: 'Tonight in Indore',
+      title: 'Sarafa Bazaar Midnight Food Trail',
+      subtitle: 'Curated 9-stop walk from Garadu to Malpua after 8 PM.',
+      ctaLabel: 'Explore Food Trail',
+      imageUrl: '/src/assets/images/promo_street_food_1795363555879.jpg',
+      targetRoute: 'explore',
+    },
+  };
+
+  const jaipurCity: CityDoc = {
+    id: 'jaipur',
+    name: 'Jaipur',
+    state: 'Rajasthan',
+    latitude: 26.9124,
+    longitude: 75.7873,
+    heroImageUrl: '/src/assets/images/jaipur_city_hero_1795363555561.jpg',
+    collectionName: 'city_jaipur',
+    heroSubtitle: 'Royal Forts, Pink Sandstone Courtyards & Heritage Bazaars',
+    promoBanner: {
+      id: 'jaipur_heritage_pass',
+      badgeText: 'Weekend Itinerary',
+      title: 'Golden Hour Fort & Stepwell Circuit',
+      subtitle: 'Build a custom 2-day route across Amber, Nahargarh & Panna Meena.',
+      ctaLabel: 'Plan Your Trip',
+      imageUrl: '/src/assets/images/heritage_palace_place_1795363554854.jpg',
+      targetRoute: 'plan_trip',
+    },
+  };
+
+  const indoreCategories: CategoryDoc[] = [
+    {
+      id: 'indore_heritage',
+      cityId: 'indore',
+      category: 'HERITAGE',
+      title: 'Places & Attractions',
+      subCategories: ['Holkar Palaces', 'Historic Landmarks', 'Museums', 'Stepwells'],
+    },
+    {
+      id: 'indore_food',
+      cityId: 'indore',
+      category: 'FOOD',
+      title: 'Food & Dining',
+      subCategories: ['Street Food', 'Night Markets', 'Sweets & Namkeen', 'Cafes'],
+    },
+    {
+      id: 'indore_shopping',
+      cityId: 'indore',
+      category: 'SHOPPING',
+      title: 'Shopping & Markets',
+      subCategories: ['Cloth Markets', 'Bazaars', 'Malls', 'Handicrafts'],
+    },
+    {
+      id: 'indore_entertainment',
+      cityId: 'indore',
+      category: 'ENTERTAINMENT',
+      title: 'Fun & Entertainment',
+      subCategories: ['Gaming Zones', 'Cinemas', 'Live Music', 'Adventure Parks'],
+    },
+    {
+      id: 'indore_nature',
+      cityId: 'indore',
+      category: 'NATURE',
+      title: 'Nature & Outdoors',
+      subCategories: ['Lakes', 'Waterfalls', 'Wildlife Sanctuaries', 'Hills'],
+    },
+    {
+      id: 'indore_culture',
+      cityId: 'indore',
+      category: 'CULTURE',
+      title: 'Culture & Events',
+      subCategories: ['Temples', 'Glass Architecture', 'Art Galleries', 'Festivals'],
+    },
+  ];
+
+  const jaipurCategories: CategoryDoc[] = [
+    {
+      id: 'jaipur_heritage',
+      cityId: 'jaipur',
+      category: 'HERITAGE',
+      title: 'Places & Attractions',
+      subCategories: ['Forts', 'Palaces', 'Stepwells', 'Observatories'],
+    },
+    {
+      id: 'jaipur_food',
+      cityId: 'jaipur',
+      category: 'FOOD',
+      title: 'Food & Dining',
+      subCategories: ['Rajasthani Thali', 'Lassi & Chai', 'Rooftop Dining', 'Kachori Spots'],
+    },
+    {
+      id: 'jaipur_shopping',
+      cityId: 'jaipur',
+      category: 'SHOPPING',
+      title: 'Shopping & Markets',
+      subCategories: ['Johari Bazaar', 'Blue Pottery', 'Block Prints', 'Gemstones'],
+    },
+    {
+      id: 'jaipur_entertainment',
+      cityId: 'jaipur',
+      category: 'ENTERTAINMENT',
+      title: 'Fun & Entertainment',
+      subCategories: ['Cultural Villages', 'Light Shows', 'Hot Air Balloon', 'Cinemas'],
+    },
+    {
+      id: 'jaipur_nature',
+      cityId: 'jaipur',
+      category: 'NATURE',
+      title: 'Nature & Outdoors',
+      subCategories: ['Leopard Reserves', 'Gardens', 'Hills', 'Lakes'],
+    },
+    {
+      id: 'jaipur_culture',
+      cityId: 'jaipur',
+      category: 'CULTURE',
+      title: 'Culture & Events',
+      subCategories: ['Literature Festivals', 'Folk Dance', 'Temples', 'Heritage Walks'],
+    },
+  ];
+
+  const indoreItems: Array<PlaceDoc | ServiceDoc> = [
+    {
+      id: 'rajwada_palace',
+      cityId: 'indore',
+      docType: 'place',
+      name: 'Rajwada Palace',
+      subtitle: 'Seven-story Holkar dynasty landmark at Old Indore Square',
+      category: 'HERITAGE',
+      subCategories: ['Holkar Palaces', 'Historic Landmarks'],
+      tags: ['architecture', 'evening-lights', 'history'],
+      imageUrl: '/src/assets/images/indore_city_hero_1795363554899.jpg',
+      description:
+        'Built by the Holkar rulers in the 18th century, Rajwada blends Maratha, Mughal, and French architectural styles with landscaped gardens and an evening sound-and-light show.',
+      rating: 4.7,
+      reviewCountLabel: '18.4k Reviews',
+      distanceLabel: '0.8 km',
+      openHours: '10:00 AM – 5:00 PM',
+      phone: '+91 731 253 1850',
+      address: 'Rajwada Chowk, Old Indore, Indore, MP 452004',
+      latitude: 22.7185,
+      longitude: 75.8548,
+      isPopular: true,
+      isTrending: true,
+    },
+    {
+      id: 'sarafa_bazaar',
+      cityId: 'indore',
+      docType: 'place',
+      name: 'Sarafa Night Food Bazaar',
+      subtitle: 'Iconic late-night street food lane after 8 PM',
+      category: 'FOOD',
+      subCategories: ['Street Food', 'Night Markets', 'Sweets & Namkeen'],
+      tags: ['bhutte-ka-kees', 'garadu', 'late-night'],
+      imageUrl: '/src/assets/images/promo_street_food_1795363555879.jpg',
+      description:
+        'By day a traditional jewelry market, Sarafa transforms at 8:00 PM into India’s most celebrated open-air midnight street food corridor.',
+      rating: 4.9,
+      reviewCountLabel: '32.1k Reviews',
+      distanceLabel: '1.1 km',
+      openHours: '8:00 PM – 1:30 AM',
+      phone: '',
+      address: 'Bada Sarafa, Indore, MP 452002',
+      latitude: 22.7166,
+      longitude: 75.8535,
+      isPopular: true,
+      isTrending: true,
+    },
+    {
+      id: 'lal_bagh_palace',
+      cityId: 'indore',
+      docType: 'place',
+      name: 'Lal Bagh Palace',
+      subtitle: 'Grand European-style Holkar residence on Khan Riverbank',
+      category: 'HERITAGE',
+      subCategories: ['Holkar Palaces', 'Museums'],
+      tags: ['italian-marble', 'museum', 'gardens'],
+      imageUrl: '/src/assets/images/heritage_palace_place_1795363554854.jpg',
+      description:
+        'One of the grandest monuments of the Holkar dynasty featuring ornate Belgian stained glass, Italian marble columns, and preserved royal reception halls.',
+      rating: 4.6,
+      reviewCountLabel: '9.2k Reviews',
+      distanceLabel: '3.4 km',
+      openHours: '10:00 AM – 5:00 PM (Closed Mon)',
+      phone: '+91 731 247 7235',
+      address: 'Nai Duniya Marg, Lal Bagh, Indore, MP 452009',
+      latitude: 22.7003,
+      longitude: 75.8471,
+      isPopular: true,
+      isTrending: false,
+    },
+    {
+      id: 'chhappan_dukan',
+      cityId: 'indore',
+      docType: 'place',
+      name: 'Chhappan Dukan Food Street',
+      subtitle: '56 curated clean-street culinary outlets & cafes',
+      category: 'FOOD',
+      subCategories: ['Street Food', 'Cafes', 'Sweets & Namkeen'],
+      tags: ['poha-jalebi', 'clean-street-hub', 'breakfast'],
+      imageUrl: '/src/assets/images/promo_street_food_1795363555879.jpg',
+      description:
+        'Pedestrian-only food boulevard famous for Indori Poha, Johny Hot Dog, cold coffee, and FSSAI Clean Street Food Hub certification.',
+      rating: 4.8,
+      reviewCountLabel: '24.6k Reviews',
+      distanceLabel: '2.9 km',
+      openHours: '7:00 AM – 11:00 PM',
+      phone: '',
+      address: 'New Palasia, 56 Dukan, Indore, MP 452001',
+      latitude: 22.7244,
+      longitude: 75.8839,
+      isPopular: false,
+      isTrending: true,
+    },
+    {
+      id: 'indore_junction_railway',
+      cityId: 'indore',
+      docType: 'service',
+      group: 'TRANSPORT',
+      name: 'Indore Junction Railway Station',
+      subtitle: 'Main BG railhead with prepaid auto & taxi desk',
+      distanceOrHours: 'Open 24 Hours',
+      latitude: 22.7171,
+      longitude: 75.8691,
+      phone: '139',
+    },
+    {
+      id: 'iim_indore_campus',
+      cityId: 'indore',
+      docType: 'service',
+      group: 'COLLEGES',
+      name: 'IIM Indore (Prabandh Shikhar)',
+      subtitle: 'Premier management institute hilltop campus on Rau-Pithampur Rd',
+      distanceOrHours: '8:00 AM – 6:00 PM',
+      latitude: 22.6253,
+      longitude: 75.7924,
+      phone: '+91 731 243 9666',
+    },
+    {
+      id: 'apollo_pharmacy_palasia',
+      cityId: 'indore',
+      docType: 'service',
+      group: 'PHARMACY',
+      name: 'Apollo 24x7 Pharmacy — Palasia',
+      subtitle: 'Round-the-clock prescription medicines & essentials',
+      distanceOrHours: 'Open 24 Hours',
+      latitude: 22.7252,
+      longitude: 75.8857,
+      phone: '+91 731 404 2211',
+    },
+    {
+      id: 'my_hospital_emergency',
+      cityId: 'indore',
+      docType: 'service',
+      group: 'EMERGENCY',
+      name: 'MY Hospital Trauma & Emergency Center',
+      subtitle: '24/7 emergency trauma unit & ambulance dispatch',
+      distanceOrHours: 'Open 24 Hours',
+      latitude: 22.7131,
+      longitude: 75.8797,
+      phone: '108',
+    },
+  ];
+
+  const jaipurItems: Array<PlaceDoc | ServiceDoc> = [
+    {
+      id: 'amber_fort',
+      cityId: 'jaipur',
+      docType: 'place',
+      name: 'Amber Fort & Palace',
+      subtitle: 'Hilltop Rajput fortress overlooking Maota Lake',
+      category: 'HERITAGE',
+      subCategories: ['Forts', 'Palaces'],
+      tags: ['sheesh-mahal', 'unesco', 'sunset'],
+      imageUrl: '/src/assets/images/jaipur_city_hero_1795363555561.jpg',
+      description:
+        'A majestic 16th-century hilltop fort known for its artistic Hindu elements, cobble pathways, and mirror-inlaid Sheesh Mahal courtyard.',
+      rating: 4.8,
+      reviewCountLabel: '64.0k Reviews',
+      distanceLabel: '11.2 km',
+      openHours: '8:00 AM – 5:30 PM',
+      phone: '+91 141 253 0293',
+      address: 'Devisinghpura, Amer, Jaipur, RJ 302001',
+      latitude: 26.9855,
+      longitude: 75.8513,
+      isPopular: true,
+      isTrending: true,
+    },
+    {
+      id: 'city_palace_jaipur',
+      cityId: 'jaipur',
+      docType: 'place',
+      name: 'City Palace Courtyard',
+      subtitle: 'Royal residence complex with Pritam Niwas Chowk gates',
+      category: 'HERITAGE',
+      subCategories: ['Palaces', 'Observatories'],
+      tags: ['peacock-gate', 'museum', 'pink-city'],
+      imageUrl: '/src/assets/images/heritage_palace_place_1795363554854.jpg',
+      description:
+        'Located at the heart of the walled Pink City, featuring Chandra Mahal, Mubarak Mahal textile gallery, and the iconic four-seasons gates.',
+      rating: 4.7,
+      reviewCountLabel: '41.5k Reviews',
+      distanceLabel: '1.4 km',
+      openHours: '9:30 AM – 5:00 PM',
+      phone: '+91 141 408 8888',
+      address: 'Tulsi Marg, Gangori Bazaar, J.D.A. Market, Jaipur, RJ 302002',
+      latitude: 26.9258,
+      longitude: 75.8237,
+      isPopular: true,
+      isTrending: false,
+    },
+    {
+      id: 'jaipur_metro_badi_chaupar',
+      cityId: 'jaipur',
+      docType: 'service',
+      group: 'TRANSPORT',
+      name: 'Badi Chaupar Metro Station',
+      subtitle: 'Underground Pink Line station inside the Walled City',
+      distanceOrHours: '6:20 AM – 10:00 PM',
+      latitude: 26.9231,
+      longitude: 75.8271,
+      phone: '+91 141 282 2100',
+    },
+  ];
+
+  const trips: TripDoc[] = [
+    {
+      id: 'trip_indore_weekend_01',
+      userId: 'usr_ananya_29',
+      title: 'Old Indore Heritage & Midnight Food Walk',
+      cityId: 'indore',
+      duration: '2 Days',
+      placeIds: ['rajwada_palace', 'sarafa_bazaar', 'lal_bagh_palace'],
+      completedPlaceIds: ['rajwada_palace', 'sarafa_bazaar'],
+      startDateMillis: now + 86400000 * 3,
+      status: 'UPCOMING',
+      createdAt: now - 86400000 * 2,
+    },
+    {
+      id: 'trip_indore_foodie_02',
+      userId: 'usr_rohan_84',
+      title: 'Indore Poha to Sarafa Tasting Loop',
+      cityId: 'indore',
+      duration: '1 Day',
+      placeIds: ['chhappan_dukan', 'sarafa_bazaar'],
+      completedPlaceIds: ['chhappan_dukan', 'sarafa_bazaar'],
+      startDateMillis: now - 86400000 * 5,
+      status: 'COMPLETED',
+      createdAt: now - 86400000 * 7,
+    },
+    {
+      id: 'trip_jaipur_forts_01',
+      userId: 'usr_meera_12',
+      title: 'Pink City Palaces & Amber Sunrise',
+      cityId: 'jaipur',
+      duration: '2 Days',
+      placeIds: ['amber_fort', 'city_palace_jaipur'],
+      completedPlaceIds: ['amber_fort'],
+      startDateMillis: now + 86400000 * 6,
+      status: 'UPCOMING',
+      createdAt: now - 86400000,
+    },
+  ];
+
+  const tips: TipDoc[] = [
+    {
+      id: 'tip_sarafa_01',
+      cityId: 'indore',
+      placeId: 'sarafa_bazaar',
+      placeName: 'Sarafa Night Food Bazaar',
+      note: 'Arrive around 9:15 PM when all jewelry shutters have closed and the Joshi Dahi Bada + Garadu stalls are in full swing.',
+      rating: 5,
+      timestamp: now - 3600000 * 14,
+    },
+    {
+      id: 'tip_rajwada_02',
+      cityId: 'indore',
+      placeId: 'rajwada_palace',
+      placeName: 'Rajwada Palace',
+      note: 'Stay for the evening lighting at 7:00 PM; parking is easiest near Krishnapura Chhatri.',
+      rating: 4.5,
+      timestamp: now - 86400000 * 3,
+    },
+    {
+      id: 'tip_amber_01',
+      cityId: 'jaipur',
+      placeId: 'amber_fort',
+      placeName: 'Amber Fort & Palace',
+      note: 'Book composite ticket online before 8:30 AM to beat tour bus queues at Suraj Pol.',
+      rating: 5,
+      timestamp: now - 86400000 * 2,
+    },
+  ];
+
+  return {
+    cities: [indoreCities, jaipurCity],
+    categories: [...indoreCategories, ...jaipurCategories],
+    cityCollections: {
+      city_indore: indoreItems,
+      city_jaipur: jaipurItems,
+    },
+    trips,
+    tips,
+  };
+}
