@@ -3,10 +3,11 @@ import type { FormEvent } from 'react';
 import { Compass, KeyRound, Loader2, Lock, Mail } from 'lucide-react';
 import { api, setAuthCredentials } from '../lib/api.ts';
 import type { AuthStatusResponse } from '../lib/api.ts';
+import type { AdminSessionUser } from '../types.ts';
 
 interface AdminAuthGateProps {
   authStatus: AuthStatusResponse;
-  onAuthenticated: (info: { email: string; dbMode: 'mongodb' | 'local' }) => void;
+  onAuthenticated: (info: AdminSessionUser) => void;
 }
 
 export function AdminAuthGate({ authStatus, onAuthenticated }: AdminAuthGateProps) {
@@ -38,7 +39,13 @@ export function AdminAuthGate({ authStatus, onAuthenticated }: AdminAuthGateProp
     try {
       const res = await api.setupAdmin(email.trim(), password);
       setAuthCredentials({ token: res.token });
-      onAuthenticated({ email: res.email, dbMode: res.dbMode });
+      onAuthenticated({
+        role: res.role,
+        email: res.email,
+        name: res.name,
+        allowedCityIds: res.allowedCityIds ?? [],
+        dbMode: res.dbMode,
+      });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -59,7 +66,13 @@ export function AdminAuthGate({ authStatus, onAuthenticated }: AdminAuthGateProp
         }
         const res = await api.login({ adminKey: adminKey.trim() });
         setAuthCredentials({ token: res.token, adminKey: adminKey.trim() });
-        onAuthenticated({ email: res.email, dbMode: res.dbMode });
+        onAuthenticated({
+          role: res.role,
+          email: res.email,
+          name: res.name,
+          allowedCityIds: res.allowedCityIds ?? [],
+          dbMode: res.dbMode,
+        });
       } else {
         if (!email.trim() || !password) {
           setError('Enter both email/username and password.');
@@ -68,7 +81,13 @@ export function AdminAuthGate({ authStatus, onAuthenticated }: AdminAuthGateProp
         }
         const res = await api.login({ email: email.trim(), password });
         setAuthCredentials({ token: res.token });
-        onAuthenticated({ email: res.email, dbMode: res.dbMode });
+        onAuthenticated({
+          role: res.role,
+          email: res.email,
+          name: res.name,
+          allowedCityIds: res.allowedCityIds ?? [],
+          dbMode: res.dbMode,
+        });
       }
     } catch (err) {
       setError((err as Error).message);

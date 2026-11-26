@@ -14,36 +14,52 @@ import {
   RefreshCw,
   Route,
   Search,
+  Smartphone,
+  Users,
   X,
 } from 'lucide-react';
 import { api } from '../lib/api.ts';
-import type { CategoryDoc, CityDoc, PlaceDoc, ServiceDoc, TripDoc } from '../types.ts';
+import type {
+  AdminSessionUser,
+  AppGuideDoc,
+  CategoryDoc,
+  CityDoc,
+  MapCategoryDoc,
+  PlaceDoc,
+  ServiceDoc,
+  TripDoc,
+} from '../types.ts';
 import { CityHub } from './CityHub.tsx';
 import { SafeImage } from './SafeImage.tsx';
+import { AppGuideTab } from './workspace/AppGuideTab.tsx';
 import { CategoriesTab } from './workspace/CategoriesTab.tsx';
 import { HomePromoTab } from './workspace/HomePromoTab.tsx';
 import { InspectorTab } from './workspace/InspectorTab.tsx';
+import { MapCategoriesTab } from './workspace/MapCategoriesTab.tsx';
 import { OverviewTab } from './workspace/OverviewTab.tsx';
 import { PlacesTab } from './workspace/PlacesTab.tsx';
 import { ServicesTab } from './workspace/ServicesTab.tsx';
+import { SubAdminsTab } from './workspace/SubAdminsTab.tsx';
 
 export type AdminSectionKey =
   | 'overview'
   | 'home'
   | 'places'
   | 'categories'
+  | 'map-categories'
   | 'services'
+  | 'app-guides'
   | 'inspector'
-  | 'cities';
+  | 'cities'
+  | 'sub-admins';
 
 interface CityWorkspaceProps {
   cities: CityDoc[];
   selectedCity: CityDoc | null;
   loadingCities: boolean;
-  dbMode: 'mongodb' | 'local';
-  userEmail: string;
+  sessionUser: AdminSessionUser;
   onSelectCity: (city: CityDoc) => void;
-  onCityUpdated: (city: CityDoc) => void;
+  onCitiesRefresh: () => Promise<void>;
   onAddCity: () => void;
   onEditCity: (city: CityDoc) => void;
   onDeleteCity: (city: CityDoc) => void;
@@ -52,42 +68,47 @@ interface CityWorkspaceProps {
 }
 
 const CITY_NAV_ITEMS: ReadonlyArray<{
-  key: Exclude<AdminSectionKey, 'cities'>;
+  key: Exclude<AdminSectionKey, 'cities' | 'sub-admins'>;
   label: string;
   icon: typeof LayoutDashboard;
 }> = [
   { key: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { key: 'home', label: 'City Home & Banner', icon: LayoutTemplate },
-  { key: 'places', label: 'Places & Attractions', icon: Compass },
-  { key: 'categories', label: 'Categories & Subcategories', icon: FolderTree },
-  { key: 'services', label: 'City Services', icon: Building2 },
-  { key: 'inspector', label: 'User Trips', icon: Route },
+  { key: 'home', label: 'Home & Promo Banner', icon: LayoutTemplate },
+  { key: 'places', label: 'Places & Map Locations', icon: Compass },
+  { key: 'categories', label: 'Explore Subcategories', icon: FolderTree },
+  { key: 'map-categories', label: 'Map Sub-Categories', icon: MapPin },
+  { key: 'services', label: 'City Hub — Services', icon: Building2 },
+  { key: 'app-guides', label: 'City Hub — App Guide', icon: Smartphone },
+  { key: 'inspector', label: 'Tips & Trips Moderation', icon: Route },
 ];
 
 const SECTION_TITLES: Record<AdminSectionKey, string> = {
   overview: 'Overview',
-  home: 'City Home & Banner',
-  places: 'Places & Attractions',
-  categories: 'Categories & Subcategories',
-  services: 'City Services',
-  inspector: 'User Trips',
-  cities: 'Cities Registry',
+  home: 'Home & Promo Banner',
+  places: 'Places & Map Locations',
+  categories: 'Explore Subcategories',
+  'map-categories': 'Map Sub-Categories',
+  services: 'City Hub — Services',
+  'app-guides': 'City Hub — App Guide',
+  inspector: 'Tips & Trips Moderation',
+  cities: 'Cities Manager',
+  'sub-admins': 'Admin Management',
 };
 
 export function CityWorkspace({
   cities,
   selectedCity,
   loadingCities,
-  dbMode,
-  userEmail,
+  sessionUser,
   onSelectCity,
-  onCityUpdated,
+  onCitiesRefresh,
   onAddCity,
   onEditCity,
   onDeleteCity,
   onLogout,
   onToast,
 }: CityWorkspaceProps) {
+  const isSuperAdmin = sessionUser.role === 'SUPER_ADMIN';
   const [activeSection, setActiveSection] = useState<AdminSectionKey>(
     selectedCity ? 'overview' : 'cities'
   );
@@ -97,26 +118,36 @@ export function CityWorkspace({
   const [addPlaceSignal, setAddPlaceSignal] = useState(0);
 
   const [categories, setCategories] = useState<CategoryDoc[]>([]);
+  const [mapCategories, setMapCategories] = useState<MapCategoryDoc[]>([]);
   const [places, setPlaces] = useState<PlaceDoc[]>([]);
   const [services, setServices] = useState<ServiceDoc[]>([]);
+  const [appGuides, setAppGuides] = useState<AppGuideDoc[]>([]);
   const [trips, setTrips] = useState<TripDoc[]>([]);
   const [loadingCityData, setLoadingCityData] = useState(false);
   const [syncingApps, setSyncingApps] = useState(false);
 
   useEffect(() => {
+    if (!isSuperAdmin && activeSection === 'sub-admins') {
+      setActiveSection(selectedCity ? 'overview' : 'cities');
+      return;
+    }
     if (!selectedCity) {
-      if (activeSection !== 'cities') setActiveSection('cities');
+      if (activeSection !== 'cities' && activeSection !== 'sub-admins') {
+        setActiveSection('cities');
+      }
     } else if (!hasAutoOpenedRef.current) {
       hasAutoOpenedRef.current = true;
       setActiveSection('overview');
     }
-  }, [selectedCity, activeSection]);
+  }, [selectedCity, activeSection, isSuperAdmin]);
 
   useEffect(() => {
     if (!selectedCity) {
       setCategories([]);
+      setMapCategories([]);
       setPlaces([]);
       setServices([]);
+      setAppGuides([]);
       setTrips([]);
       return;
     }
@@ -125,16 +156,20 @@ export function CityWorkspace({
     setLoadingCityData(true);
     Promise.all([
       api.listCategories(selectedCity.id),
+      api.listMapCategories(selectedCity.id),
       api.listPlaces(selectedCity.id),
       api.listServices(selectedCity.id),
+      api.listAppGuides(selectedCity.id),
       api.listTrips(selectedCity.id, ''),
     ])
-      .then(([catRes, placesRes, servicesRes, tripsRes]) => {
+      .then(([catRes, mapCatRes, placesRes, servicesRes, appGuidesRes, tripsRes]) => {
         if (!active) return;
-        setCategories(catRes.categories);
-        setPlaces(placesRes.places);
-        setServices(servicesRes.services);
-        setTrips(tripsRes.trips);
+        setCategories(Array.isArray(catRes?.categories) ? catRes.categories : []);
+        setMapCategories(Array.isArray(mapCatRes?.mapCategories) ? mapCatRes.mapCategories : []);
+        setPlaces(Array.isArray(placesRes?.places) ? placesRes.places : []);
+        setServices(Array.isArray(servicesRes?.services) ? servicesRes.services : []);
+        setAppGuides(Array.isArray(appGuidesRes?.appGuides) ? appGuidesRes.appGuides : []);
+        setTrips(Array.isArray(tripsRes?.trips) ? tripsRes.trips : []);
       })
       .catch((err) => {
         if (!active) return;
@@ -152,7 +187,7 @@ export function CityWorkspace({
 
   const handleTriggerAddPlace = () => {
     if (!selectedCity) {
-      onAddCity();
+      if (isSuperAdmin) onAddCity();
       return;
     }
     setActiveSection('places');
@@ -161,6 +196,7 @@ export function CityWorkspace({
 
   const handleSyncLiveApps = async () => {
     if (syncingApps) return;
+    if (!isSuperAdmin && !selectedCity) return;
     setSyncingApps(true);
     try {
       await api.syncLiveApps(selectedCity?.id || '');
@@ -237,7 +273,9 @@ export function CityWorkspace({
                 const next = cities.find((c) => c.id === e.target.value);
                 if (next) {
                   onSelectCity(next);
-                  if (activeSection === 'cities') setActiveSection('overview');
+                  if (activeSection === 'cities' || activeSection === 'sub-admins') {
+                    setActiveSection('overview');
+                  }
                 }
               }}
               className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
@@ -291,7 +329,7 @@ export function CityWorkspace({
 
         <div className="space-y-1 border-t border-slate-100 pt-4">
           <p className="px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-            Global
+            {isSuperAdmin ? 'App Settings' : 'Cities'}
           </p>
           <button
             type="button"
@@ -307,21 +345,43 @@ export function CityWorkspace({
           >
             <span className="flex items-center gap-2.5 min-w-0">
               <Globe2 className="w-4 h-4 shrink-0" />
-              <span className="truncate">Cities Registry</span>
+              <span className="truncate">{isSuperAdmin ? 'Cities Manager' : 'Assigned Cities'}</span>
             </span>
             <span className="font-mono text-[11px] tabular-nums opacity-75">
               {cities.length}
             </span>
           </button>
+
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection('sub-admins');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors text-left ${
+                activeSection === 'sub-admins'
+                  ? 'bg-[#E0F2FE] text-[#0284C7]'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 min-w-0">
+                <Users className="w-4 h-4 shrink-0" />
+                <span className="truncate">Admin Management</span>
+              </span>
+            </button>
+          )}
         </div>
       </nav>
 
       {/* Sidebar Footer */}
       <div className="p-3.5 border-t border-slate-200 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-slate-800 truncate">{userEmail}</p>
-          <p className="text-[11px] text-slate-500">
-            {dbMode === 'mongodb' ? 'MongoDB' : 'Local Store'}
+          <p className="text-xs font-semibold text-slate-800 truncate">
+            {sessionUser.name || sessionUser.email}
+          </p>
+          <p className="text-[11px] text-slate-500 truncate">
+            {isSuperAdmin ? 'Supreme Admin' : `Sub-Admin (${cities.length} ${cities.length === 1 ? 'city' : 'cities'})`} · {sessionUser.dbMode === 'mongodb' ? 'MongoDB' : 'Local'}
           </p>
         </div>
         <button
@@ -368,7 +428,7 @@ export function CityWorkspace({
       {/* Right Content Column */}
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Sticky Top Header (64px height) */}
-        <header className="sticky top-0 z-30 h-16 border-b border-slate-200 bg-white/95 backdrop-blur-sm px-4 sm:px-6 flex items-center justify-between gap-4">
+        <header className="sticky top-0 z-30 h-16 border-b border-slate-200 bg-white/95 backdrop-blur-sm px-4 sm:px-6 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
@@ -379,7 +439,37 @@ export function CityWorkspace({
               <Menu className="w-4 h-4" />
             </button>
 
-            <nav className="flex items-center gap-1.5 text-sm min-w-0" aria-label="Breadcrumb">
+            {/* Global City Switcher Dropdown at Top */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <label htmlFor="top-global-city-switcher" className="sr-only">
+                Global City Switcher
+              </label>
+              <select
+                id="top-global-city-switcher"
+                value={selectedCity?.id ?? ''}
+                onChange={(e) => {
+                  const next = cities.find((c) => c.id === e.target.value);
+                  if (next) {
+                    onSelectCity(next);
+                    if (activeSection === 'cities' || activeSection === 'sub-admins') {
+                      setActiveSection('overview');
+                    }
+                  }
+                }}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-white focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30 max-w-[160px]"
+              >
+                <option value="" disabled>
+                  Select City...
+                </option>
+                {cities.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}, {c.state}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <nav className="hidden sm:flex items-center gap-1.5 text-sm min-w-0" aria-label="Breadcrumb">
               <button
                 type="button"
                 onClick={() => setActiveSection('cities')}
@@ -387,18 +477,6 @@ export function CityWorkspace({
               >
                 Cities
               </button>
-              {selectedCity && activeSection !== 'cities' && (
-                <>
-                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
-                  <button
-                    type="button"
-                    onClick={() => setActiveSection('overview')}
-                    className="text-slate-600 hover:text-slate-900 font-medium transition-colors truncate max-w-[140px]"
-                  >
-                    {selectedCity.name}
-                  </button>
-                </>
-              )}
               <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
               <span className="font-semibold text-slate-900 truncate">
                 {SECTION_TITLES[activeSection]}
@@ -406,9 +484,9 @@ export function CityWorkspace({
             </nav>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             {activeSection === 'places' && (
-              <div className="relative hidden md:block w-56">
+              <div className="relative hidden md:block w-52">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
@@ -420,14 +498,10 @@ export function CityWorkspace({
               </div>
             )}
 
-            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-[#ECFDF5] px-2.5 py-1 text-[11px] font-semibold text-[#059669]">
-              {dbMode === 'mongodb' ? 'MongoDB Live' : 'Local Synced'}
-            </span>
-
             <button
               type="button"
               onClick={() => void handleSyncLiveApps()}
-              disabled={syncingApps}
+              disabled={syncingApps || (!isSuperAdmin && !selectedCity)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 transition-colors whitespace-nowrap"
               title="Push instant refresh notification to City Companion Android apps"
             >
@@ -435,15 +509,17 @@ export function CityWorkspace({
               <span className="hidden sm:inline">Sync Live Apps</span>
             </button>
 
-            {activeSection === 'cities' || !selectedCity ? (
-              <button
-                type="button"
-                onClick={onAddCity}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0284C7] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#0369A1] transition-colors whitespace-nowrap"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Add City
-              </button>
+            {(activeSection === 'cities' || activeSection === 'sub-admins' || !selectedCity) ? (
+              isSuperAdmin && activeSection !== 'sub-admins' ? (
+                <button
+                  type="button"
+                  onClick={onAddCity}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0284C7] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#0369A1] transition-colors whitespace-nowrap"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add City
+                </button>
+              ) : null
             ) : (
               <button
                 type="button"
@@ -459,11 +535,14 @@ export function CityWorkspace({
 
         {/* Main Scrollable Viewport */}
         <main className="flex-1 p-5 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-          {activeSection === 'cities' || !selectedCity ? (
+          {activeSection === 'sub-admins' && isSuperAdmin ? (
+            <SubAdminsTab cities={cities} onToast={onToast} />
+          ) : activeSection === 'cities' || !selectedCity ? (
             <CityHub
               cities={cities}
               selectedCityId={selectedCity?.id ?? null}
               loading={loadingCities}
+              isSuperAdmin={isSuperAdmin}
               onSelectCity={(c) => {
                 onSelectCity(c);
                 setActiveSection('overview');
@@ -489,6 +568,7 @@ export function CityWorkspace({
                   categories={categories}
                   places={places}
                   services={services}
+                  appGuides={appGuides}
                   trips={trips}
                   onNavigate={(tab) => setActiveSection(tab)}
                   onEditCityMeta={() => onEditCity(selectedCity)}
@@ -499,10 +579,8 @@ export function CityWorkspace({
                 <HomePromoTab
                   city={selectedCity}
                   places={places}
-                  onCityUpdated={onCityUpdated}
-                  onPlaceUpdated={(updated) =>
-                    setPlaces((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
-                  }
+                  onCitiesRefresh={onCitiesRefresh}
+                  onPlacesChanged={setPlaces}
                   onToast={onToast}
                 />
               )}
@@ -523,11 +601,18 @@ export function CityWorkspace({
                 <CategoriesTab
                   city={selectedCity}
                   categories={categories}
-                  onCategoryUpdated={(updated) =>
-                    setCategories((prev) =>
-                      prev.map((c) => (c.category === updated.category ? updated : c))
-                    )
-                  }
+                  onCategoriesChanged={setCategories}
+                  onToast={onToast}
+                />
+              )}
+
+              {activeSection === 'map-categories' && (
+                <MapCategoriesTab
+                  city={selectedCity}
+                  cities={cities}
+                  mapCategories={mapCategories}
+                  onSelectCity={onSelectCity}
+                  onMapCategoriesChanged={setMapCategories}
                   onToast={onToast}
                 />
               )}
@@ -537,6 +622,15 @@ export function CityWorkspace({
                   city={selectedCity}
                   services={services}
                   onServicesChanged={setServices}
+                  onToast={onToast}
+                />
+              )}
+
+              {activeSection === 'app-guides' && (
+                <AppGuideTab
+                  city={selectedCity}
+                  appGuides={appGuides}
+                  onAppGuidesChanged={setAppGuides}
                   onToast={onToast}
                 />
               )}

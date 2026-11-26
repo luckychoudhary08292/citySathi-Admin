@@ -3,6 +3,7 @@ import {
   Copy,
   Edit3,
   FileJson,
+  Info,
   Plus,
   Search,
   Star,
@@ -109,24 +110,30 @@ export function PlacesTab({
     setDrawerOpen(true);
   };
 
-  const handleSaved = (saved: PlaceDoc, isNew: boolean) => {
-    if (isNew) {
-      onPlacesChanged([...places, saved].sort((a, b) => a.name.localeCompare(b.name)));
-      onToast('success', `Changes saved to ${city.name}`);
-    } else {
-      onPlacesChanged(places.map((p) => (p.id === saved.id ? saved : p)));
-      onToast('success', `Changes saved to ${city.name}`);
+  const refreshPlaces = async () => {
+    const fresh = await api.listPlaces(city.id);
+    onPlacesChanged(fresh.places);
+  };
+
+  const handleSaved = async (saved: PlaceDoc) => {
+    try {
+      await refreshPlaces();
+      onToast('success', `"${saved.name}" — Saved & synced live to app`);
+    } catch (err) {
+      onToast('error', (err as Error).message);
+    } finally {
+      setDrawerOpen(false);
     }
-    setDrawerOpen(false);
   };
 
   const handleConfirmDelete = async () => {
     if (!deletingPlace) return;
     setDeletingBusy(true);
     try {
+      const removedName = deletingPlace.name;
       await api.deletePlace(city.id, deletingPlace.id);
-      onPlacesChanged(places.filter((p) => p.id !== deletingPlace.id));
-      onToast('success', `Deleted "${deletingPlace.name}" from ${city.name}`);
+      await refreshPlaces();
+      onToast('success', `Deleted "${removedName}" — Saved & synced live to app`);
       setDeletingPlace(null);
     } catch (err) {
       onToast('error', (err as Error).message);
@@ -166,6 +173,17 @@ export function PlacesTab({
             Add Place
           </button>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-sky-200 bg-[#E0F2FE]/60 px-4 py-3 flex items-start gap-2.5 text-xs text-slate-700">
+        <Info className="w-4 h-4 text-[#0284C7] shrink-0 mt-0.5" />
+        <p>
+          Items under{' '}
+          <span className="font-mono font-semibold text-[#0284C7]">
+            HOSPITAL, PHARMACY, ATM, TRANSPORT, EMERGENCY, FOOD
+          </span>{' '}
+          automatically populate the Android Map&apos;s quick-filter chips and &quot;Around Me&quot; screens.
+        </p>
       </div>
 
       {/* Clean Filter Toolbar */}
@@ -439,7 +457,7 @@ export function PlacesTab({
           editingPlace={editingPlace}
           duplicateSource={duplicateSource}
           onClose={() => setDrawerOpen(false)}
-          onSaved={handleSaved}
+          onSaved={(saved) => void handleSaved(saved)}
           onError={(msg) => onToast('error', msg)}
         />
       )}
@@ -450,14 +468,15 @@ export function PlacesTab({
           city={city}
           onClose={() => setBulkOpen(false)}
           onImported={(inserted, skippedCount) => {
-            onPlacesChanged(
-              [...places, ...inserted].sort((a, b) => a.name.localeCompare(b.name))
-            );
-            onToast(
-              'success',
-              `Imported ${inserted.length} place(s) to ${city.name}${skippedCount > 0 ? ` (${skippedCount} skipped)` : ''}`
-            );
-            setBulkOpen(false);
+            void refreshPlaces()
+              .then(() => {
+                onToast(
+                  'success',
+                  `Imported ${inserted.length} place(s) — Saved & synced live to app${skippedCount > 0 ? ` (${skippedCount} skipped)` : ''}`
+                );
+              })
+              .catch((err) => onToast('error', (err as Error).message))
+              .finally(() => setBulkOpen(false));
           }}
           onError={(msg) => onToast('error', msg)}
         />

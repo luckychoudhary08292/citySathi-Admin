@@ -1,28 +1,40 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowRight, Loader2, Save, Smartphone, Star } from 'lucide-react';
+import {
+  ArrowRight,
+  Loader2,
+  Plus,
+  Save,
+  Smartphone,
+  Star,
+  Trash2,
+} from 'lucide-react';
 import { api } from '../../lib/api.ts';
 import type { CityDoc, PlaceDoc, PromoTargetRoute } from '../../types.ts';
 import { PROMO_TARGET_ROUTES } from '../../types.ts';
+import { ConfirmDialog } from '../ConfirmDialog.tsx';
 import { SafeImage } from '../SafeImage.tsx';
 
 interface HomePromoTabProps {
   city: CityDoc;
   places: PlaceDoc[];
-  onCityUpdated: (city: CityDoc) => void;
-  onPlaceUpdated: (place: PlaceDoc) => void;
+  onCitiesRefresh: () => Promise<void>;
+  onPlacesChanged: (places: PlaceDoc[]) => void;
   onToast: (type: 'success' | 'error', message: string) => void;
 }
 
 export function HomePromoTab({
   city,
   places,
-  onCityUpdated,
-  onPlaceUpdated,
+  onCitiesRefresh,
+  onPlacesChanged,
   onToast,
 }: HomePromoTabProps) {
+  const [cityName, setCityName] = useState(city.name || '');
   const [heroImageUrl, setHeroImageUrl] = useState(city.heroImageUrl || '');
   const [heroSubtitle, setHeroSubtitle] = useState(city.heroSubtitle || '');
+
+  const [hasPromo, setHasPromo] = useState(Boolean(city.promoBanner));
   const [badgeText, setBadgeText] = useState(city.promoBanner?.badgeText || '');
   const [title, setTitle] = useState(city.promoBanner?.title || '');
   const [subtitle, setSubtitle] = useState(city.promoBanner?.subtitle || '');
@@ -31,12 +43,17 @@ export function HomePromoTab({
   const [targetRoute, setTargetRoute] = useState<PromoTargetRoute>(
     city.promoBanner?.targetRoute || 'explore'
   );
+
   const [saving, setSaving] = useState(false);
+  const [deletingPromoOpen, setDeletingPromoOpen] = useState(false);
+  const [deletingPromoBusy, setDeletingPromoBusy] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   useEffect(() => {
+    setCityName(city.name || '');
     setHeroImageUrl(city.heroImageUrl || '');
     setHeroSubtitle(city.heroSubtitle || '');
+    setHasPromo(Boolean(city.promoBanner));
     setBadgeText(city.promoBanner?.badgeText || '');
     setTitle(city.promoBanner?.title || '');
     setSubtitle(city.promoBanner?.subtitle || '');
@@ -47,27 +64,56 @@ export function HomePromoTab({
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
+    if (!cityName.trim()) {
+      onToast('error', 'City name cannot be empty.');
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await api.updateCity(city.id, {
+        name: cityName.trim(),
         heroImageUrl: heroImageUrl.trim(),
         heroSubtitle: heroSubtitle.trim(),
-        promoBanner: {
-          id: city.promoBanner?.id || `${city.id}_promo`,
-          badgeText: badgeText.trim(),
-          title: title.trim(),
-          subtitle: subtitle.trim(),
-          ctaLabel: ctaLabel.trim() || 'Explore',
-          imageUrl: promoImageUrl.trim(),
-          targetRoute,
-        },
+        promoBanner: hasPromo
+          ? {
+              id: city.promoBanner?.id || `${city.id}_promo`,
+              badgeText: badgeText.trim(),
+              title: title.trim(),
+              subtitle: subtitle.trim(),
+              ctaLabel: ctaLabel.trim() || 'Explore',
+              imageUrl: promoImageUrl.trim(),
+              targetRoute,
+            }
+          : null,
       });
-      onCityUpdated(res.city);
-      onToast('success', `Changes saved to ${city.name}`);
+      await onCitiesRefresh();
+      onToast('success', `${res.city.name} Home & Promo — Saved & synced live to app`);
     } catch (err) {
       onToast('error', (err as Error).message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleConfirmDeletePromo = async () => {
+    setDeletingPromoBusy(true);
+    try {
+      await api.updateCity(city.id, { promoBanner: null });
+      await onCitiesRefresh();
+      setHasPromo(false);
+      setBadgeText('');
+      setTitle('');
+      setSubtitle('');
+      setCtaLabel('');
+      setPromoImageUrl('');
+      setTargetRoute('explore');
+      setDeletingPromoOpen(false);
+      onToast('success', `Deleted promoBanner for ${city.name} — Saved & synced live to app`);
+    } catch (err) {
+      onToast('error', (err as Error).message);
+    } finally {
+      setDeletingPromoBusy(false);
     }
   };
 
@@ -77,10 +123,11 @@ export function HomePromoTab({
       const res = await api.updatePlace(city.id, place.id, {
         isPopular: !place.isPopular,
       });
-      onPlaceUpdated(res.place);
+      const fresh = await api.listPlaces(city.id);
+      onPlacesChanged(fresh.places);
       onToast(
         'success',
-        `${place.name} ${res.place.isPopular ? 'featured on' : 'removed from'} ${city.name} Home`
+        `${place.name} ${res.place.isPopular ? 'featured on' : 'removed from'} ${city.name} Home — Saved & synced live to app`
       );
     } catch (err) {
       onToast('error', (err as Error).message);
@@ -90,6 +137,8 @@ export function HomePromoTab({
   };
 
   const popularPlaces = places.filter((p) => p.isPopular);
+  const resolvedPreviewName = cityName.trim() || city.name;
+  const resolvedHeroSubtitle = (heroSubtitle || '').replace(/\{city\}/gi, resolvedPreviewName);
 
   return (
     <div className="space-y-6">
@@ -101,9 +150,12 @@ export function HomePromoTab({
         >
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
             <div>
-              <h2 className="text-base font-bold text-slate-900">City Home & Promo Banner</h2>
+              <h2 className="text-base font-bold text-slate-900">Home & Promo Banner Manager</h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Updates the <span className="font-mono">cities</span> document for {city.name}
+                Updates <span className="font-mono">cityName</span>,{' '}
+                <span className="font-mono">heroSubtitle</span>,{' '}
+                <span className="font-mono">headerImageUrl</span> &{' '}
+                <span className="font-mono">promoBanner</span> for {city.name}
               </p>
             </div>
             <button
@@ -120,119 +172,183 @@ export function HomePromoTab({
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
               Home Hero Header
             </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  City Name (<span className="font-mono">cityName</span>)
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={cityName}
+                  onChange={(e) => setCityName(e.target.value)}
+                  placeholder="e.g. Indore"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  Header Image URL (<span className="font-mono">headerImageUrl</span>)
+                </label>
+                <input
+                  type="text"
+                  value={heroImageUrl}
+                  onChange={(e) => setHeroImageUrl(e.target.value)}
+                  placeholder="https://... or /src/assets/images/..."
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                />
+              </div>
+            </div>
+
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                Hero Subtitle
-              </label>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label className="block text-xs font-medium text-slate-700">
+                  Hero Subtitle (<span className="font-mono">heroSubtitle</span>)
+                </label>
+                <span className="rounded bg-[#E0F2FE] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#0284C7]">
+                  Supports {'{city}'} placeholder
+                </span>
+              </div>
               <input
                 type="text"
                 value={heroSubtitle}
                 onChange={(e) => setHeroSubtitle(e.target.value)}
-                placeholder="City tagline displayed on the mobile Home header"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                Header Image URL
-              </label>
-              <input
-                type="text"
-                value={heroImageUrl}
-                onChange={(e) => setHeroImageUrl(e.target.value)}
-                placeholder="https://... or /src/assets/images/..."
+                placeholder="e.g. Discover the best spots across {city}"
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
               />
             </div>
           </div>
 
           <div className="border-t border-slate-200 pt-5 space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Promotional Banner
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  Promo Badge Text
-                </label>
-                <input
-                  type="text"
-                  value={badgeText}
-                  onChange={(e) => setBadgeText(e.target.value)}
-                  placeholder="e.g. Tonight in Indore"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
-                />
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Promotional Banner (<span className="font-mono">promoBanner</span>)
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Optional featured callout banner displayed on the mobile Home screen.
+                </p>
               </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  Target Route
-                </label>
-                <select
-                  value={targetRoute}
-                  onChange={(e) => setTargetRoute(e.target.value as PromoTargetRoute)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+              {hasPromo ? (
+                <button
+                  type="button"
+                  onClick={() => setDeletingPromoOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#DC2626] hover:bg-[#FEF2F2] transition-colors whitespace-nowrap"
                 >
-                  {PROMO_TARGET_ROUTES.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label} ({r.value})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  Promo Title
-                </label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Banner headline"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  Promo Subtitle
-                </label>
-                <textarea
-                  rows={2}
-                  value={subtitle}
-                  onChange={(e) => setSubtitle(e.target.value)}
-                  placeholder="Supporting description"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  CTA Label
-                </label>
-                <input
-                  type="text"
-                  value={ctaLabel}
-                  onChange={(e) => setCtaLabel(e.target.value)}
-                  placeholder="e.g. Explore Food Trail"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  Promo Image URL
-                </label>
-                <input
-                  type="text"
-                  value={promoImageUrl}
-                  onChange={(e) => setPromoImageUrl(e.target.value)}
-                  placeholder="https://... or /src/assets/images/..."
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
-                />
-              </div>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete Banner
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHasPromo(true);
+                    if (!badgeText) setBadgeText('Featured');
+                    if (!ctaLabel) setCtaLabel('Explore');
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#E0F2FE] px-3 py-1.5 text-xs font-semibold text-[#0284C7] hover:bg-sky-200/70 transition-colors whitespace-nowrap"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Create Promo Banner
+                </button>
+              )}
             </div>
+
+            {!hasPromo ? (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-6 text-center">
+                <p className="text-xs font-semibold text-slate-700">
+                  No promotional banner active for {resolvedPreviewName}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Click &quot;Create Promo Banner&quot; above to add a campaign card to the Home screen.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                    Promo Badge Text
+                  </label>
+                  <input
+                    type="text"
+                    value={badgeText}
+                    onChange={(e) => setBadgeText(e.target.value)}
+                    placeholder="e.g. Tonight in Indore"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                    Target Route
+                  </label>
+                  <select
+                    value={targetRoute}
+                    onChange={(e) => setTargetRoute(e.target.value as PromoTargetRoute)}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                  >
+                    {PROMO_TARGET_ROUTES.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label} ({r.value})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                    Promo Title
+                  </label>
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Banner headline"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                    Promo Subtitle
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={subtitle}
+                    onChange={(e) => setSubtitle(e.target.value)}
+                    placeholder="Supporting description"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                    CTA Label
+                  </label>
+                  <input
+                    type="text"
+                    value={ctaLabel}
+                    onChange={(e) => setCtaLabel(e.target.value)}
+                    placeholder="e.g. Explore Food Trail"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                    Promo Image URL
+                  </label>
+                  <input
+                    type="text"
+                    value={promoImageUrl}
+                    onChange={(e) => setPromoImageUrl(e.target.value)}
+                    placeholder="https://... or /src/assets/images/..."
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-[#0284C7] focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </form>
 
@@ -248,9 +364,11 @@ export function HomePromoTab({
                 <p className="text-xs text-slate-500">Real-time Hero & Promo Banner</p>
               </div>
             </div>
-            <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-medium text-slate-600">
-              {targetRoute}
-            </span>
+            {hasPromo && (
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-medium text-slate-600">
+                {targetRoute}
+              </span>
+            )}
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-3.5">
@@ -258,53 +376,59 @@ export function HomePromoTab({
             <div className="relative h-40 w-full overflow-hidden rounded-xl border border-slate-200">
               <SafeImage
                 src={heroImageUrl}
-                alt={`${city.name} hero preview`}
+                alt={`${resolvedPreviewName} hero preview`}
                 className="h-full w-full object-cover"
-                fallbackLabel={city.name}
+                fallbackLabel={resolvedPreviewName}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/85 via-slate-900/25 to-transparent" />
               <div className="absolute bottom-3.5 left-4 right-4 text-white">
                 <span className="inline-block rounded-md bg-white/20 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white mb-1">
                   {city.state}
                 </span>
-                <p className="text-lg font-bold leading-tight">{city.name}</p>
+                <p className="text-lg font-bold leading-tight">{resolvedPreviewName}</p>
                 <p className="text-xs text-slate-200 line-clamp-2 mt-0.5">
-                  {heroSubtitle || 'Add a hero subtitle to preview...'}
+                  {resolvedHeroSubtitle || 'Add a hero subtitle to preview...'}
                 </p>
               </div>
             </div>
 
             {/* Promo Banner Card Preview */}
-            <div className="relative h-36 w-full overflow-hidden rounded-xl border border-slate-200">
-              <SafeImage
-                src={promoImageUrl}
-                alt={title || 'Promo preview'}
-                className="h-full w-full object-cover"
-                fallbackLabel="Promo Banner"
-              />
-              <div className="absolute inset-0 bg-gradient-to-r from-slate-950/85 via-slate-900/60 to-slate-900/20 p-4 flex flex-col justify-between text-white">
-                <div>
-                  {badgeText && (
-                    <span className="inline-block rounded-full bg-[#0284C7] px-2.5 py-0.5 text-[10px] font-semibold text-white">
-                      {badgeText}
-                    </span>
-                  )}
-                  <p className="text-sm font-bold leading-snug mt-2">
-                    {title || 'Promo Title Preview'}
-                  </p>
-                  <p className="text-xs text-slate-200 line-clamp-2 mt-0.5">
-                    {subtitle || 'Promo subtitle appears here.'}
-                  </p>
-                </div>
+            {hasPromo ? (
+              <div className="relative h-36 w-full overflow-hidden rounded-xl border border-slate-200">
+                <SafeImage
+                  src={promoImageUrl}
+                  alt={title || 'Promo preview'}
+                  className="h-full w-full object-cover"
+                  fallbackLabel="Promo Banner"
+                />
+                <div className="absolute inset-0 bg-gradient-to-r from-slate-950/85 via-slate-900/60 to-slate-900/20 p-4 flex flex-col justify-between text-white">
+                  <div>
+                    {badgeText && (
+                      <span className="inline-block rounded-full bg-[#0284C7] px-2.5 py-0.5 text-[10px] font-semibold text-white">
+                        {badgeText}
+                      </span>
+                    )}
+                    <p className="text-sm font-bold leading-snug mt-2">
+                      {title || 'Promo Title Preview'}
+                    </p>
+                    <p className="text-xs text-slate-200 line-clamp-2 mt-0.5">
+                      {subtitle || 'Promo subtitle appears here.'}
+                    </p>
+                  </div>
 
-                <div>
-                  <span className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-900">
-                    {ctaLabel || 'Explore'}
-                    <ArrowRight className="w-3 h-3 text-[#0284C7]" />
-                  </span>
+                  <div>
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-900">
+                      {ctaLabel || 'Explore'}
+                      <ArrowRight className="w-3 h-3 text-[#0284C7]" />
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-white/80 p-4 text-center text-xs text-slate-500">
+                Promo banner hidden on mobile Home screen
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -313,7 +437,9 @@ export function HomePromoTab({
       <div className="surface-card overflow-hidden">
         <div className="border-b border-slate-200 px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-bold text-slate-900">Home Screen Featured Cards</h3>
+            <h3 className="text-base font-bold text-slate-900">
+              Home &quot;Popular Places&quot; Carousel
+            </h3>
             <p className="text-xs text-slate-500 mt-0.5">
               One-click toggle for <span className="font-mono">isPopular</span> in{' '}
               <span className="font-mono">{city.collectionName}</span>
@@ -373,6 +499,16 @@ export function HomePromoTab({
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={deletingPromoOpen}
+        title={`Delete promo banner for ${city.name}?`}
+        description="Removes promoBanner from this city document and updates connected Android apps immediately."
+        confirmLabel="Delete Banner"
+        busy={deletingPromoBusy}
+        onCancel={() => setDeletingPromoOpen(false)}
+        onConfirm={() => void handleConfirmDeletePromo()}
+      />
     </div>
   );
 }

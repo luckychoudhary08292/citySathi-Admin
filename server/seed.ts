@@ -1,6 +1,8 @@
 import type {
+  AppGuideDoc,
   CategoryDoc,
   CityDoc,
+  MapCategoryDoc,
   PlaceDoc,
   ServiceDoc,
   TipDoc,
@@ -8,12 +10,25 @@ import type {
 } from '../src/types.ts';
 import { FIXED_CATEGORIES } from '../src/types.ts';
 
+export interface SubAdminRecord {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+  allowedCityIds: string[];
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface SeedDatabaseState {
   cities: CityDoc[];
   categories: CategoryDoc[];
-  cityCollections: Record<string, Array<PlaceDoc | ServiceDoc>>;
+  mapCategories: MapCategoryDoc[];
+  cityCollections: Record<string, Array<PlaceDoc | ServiceDoc | AppGuideDoc>>;
   trips: TripDoc[];
   tips: TipDoc[];
+  subAdmins?: SubAdminRecord[];
   adminConfig?: {
     email: string;
     passwordHash: string;
@@ -41,7 +56,7 @@ export function createInitialSeedData(): SeedDatabaseState {
     longitude: 75.8577,
     heroImageUrl: '/src/assets/images/indore_city_hero_1795363554899.jpg',
     collectionName: 'city_indore',
-    heroSubtitle: 'Cleanest City & Culinary Capital of Central India',
+    heroSubtitle: 'Cleanest City & Culinary Capital of {city}',
     promoBanner: {
       id: 'indore_sarafa_night',
       badgeText: 'Tonight in Indore',
@@ -163,7 +178,7 @@ export function createInitialSeedData(): SeedDatabaseState {
     },
   ];
 
-  const indoreItems: Array<PlaceDoc | ServiceDoc> = [
+  const indoreItems: Array<PlaceDoc | ServiceDoc | AppGuideDoc> = [
     {
       id: 'rajwada_palace',
       cityId: 'indore',
@@ -261,52 +276,141 @@ export function createInitialSeedData(): SeedDatabaseState {
       cityId: 'indore',
       docType: 'service',
       group: 'TRANSPORT',
-      name: 'Indore Junction Railway Station',
+      serviceMode: 'CONTACT',
+      category: 'Contact',
+      name: 'Indore Junction Railway Enquiry',
       subtitle: 'Main BG railhead with prepaid auto & taxi desk',
+      description: '24x7 railway inquiry, PNR assistance, and station helpline.',
+      address: 'Chhoti Gwaltoli, Indore, MP 452001',
       distanceOrHours: 'Open 24 Hours',
+      highlightNumber: '139',
+      phone: '139',
+      actionUrl: '',
+      isUrgent: false,
+      iconKey: 'train',
+      sortOrder: 2,
       latitude: 22.7171,
       longitude: 75.8691,
-      phone: '139',
     },
     {
       id: 'iim_indore_campus',
       cityId: 'indore',
       docType: 'service',
       group: 'COLLEGES',
+      serviceMode: 'CONTACT',
+      category: 'Contact',
       name: 'IIM Indore (Prabandh Shikhar)',
-      subtitle: 'Premier management institute hilltop campus on Rau-Pithampur Rd',
+      subtitle: 'Premier management institute hilltop campus',
+      description: 'Campus reception and visitor information desk.',
+      address: 'Rau-Pithampur Rd, Indore, MP 453556',
       distanceOrHours: '8:00 AM – 6:00 PM',
+      highlightNumber: '0731-2439666',
+      phone: '+91 731 243 9666',
+      actionUrl: '',
+      isUrgent: false,
+      iconKey: 'graduation-cap',
+      sortOrder: 4,
       latitude: 22.6253,
       longitude: 75.7924,
-      phone: '+91 731 243 9666',
     },
     {
       id: 'apollo_pharmacy_palasia',
       cityId: 'indore',
       docType: 'service',
       group: 'PHARMACY',
-      name: 'Apollo 24x7 Pharmacy — Palasia',
-      subtitle: 'Round-the-clock prescription medicines & essentials',
+      serviceMode: 'SERVICE_NAME',
+      category: 'Pharmacy',
+      name: 'Pharmacy',
+      subtitle: '24x7 medical stores & chemists nearby',
+      description: '',
+      address: 'New Palasia & Vijay Nagar',
       distanceOrHours: 'Open 24 Hours',
+      highlightNumber: '24x7',
+      phone: '+91 731 404 2211',
+      actionUrl: '',
+      isUrgent: false,
+      iconKey: 'pill',
+      sortOrder: 3,
       latitude: 22.7252,
       longitude: 75.8857,
-      phone: '+91 731 404 2211',
     },
     {
       id: 'my_hospital_emergency',
       cityId: 'indore',
       docType: 'service',
       group: 'EMERGENCY',
-      name: 'MY Hospital Trauma & Emergency Center',
+      serviceMode: 'CONTACT',
+      category: 'Emergency',
+      name: 'MY Hospital & Ambulance Helpline',
       subtitle: '24/7 emergency trauma unit & ambulance dispatch',
+      description: 'Dial 108 for state emergency medical response and trauma care.',
+      address: 'MYH Campus, A.B. Road, Indore, MP 452001',
       distanceOrHours: 'Open 24 Hours',
+      highlightNumber: '108',
+      phone: '108',
+      actionUrl: '',
+      isUrgent: true,
+      iconKey: 'ambulance',
+      sortOrder: 1,
       latitude: 22.7131,
       longitude: 75.8797,
-      phone: '108',
+    },
+    {
+      id: 'shortcut_hospital_indore',
+      cityId: 'indore',
+      docType: 'service',
+      group: 'EMERGENCY',
+      serviceMode: 'SERVICE_NAME',
+      category: 'Hospital',
+      name: 'Hospital',
+      subtitle: 'Nearby multispeciality & trauma centers',
+      description: '',
+      address: '',
+      distanceOrHours: '24x7',
+      highlightNumber: '14',
+      phone: '',
+      actionUrl: '',
+      isUrgent: false,
+      iconKey: 'hospital',
+      sortOrder: 1,
+      latitude: 22.7196,
+      longitude: 75.8577,
+    },
+    {
+      id: 'indore_311_app',
+      cityId: 'indore',
+      docType: 'app_guide',
+      appName: 'Indore 311',
+      taskCategory: 'Civic Help',
+      highlightTag: 'Official',
+      description: 'Official Indore Municipal Corporation civic grievance, waste pickup & smart city services app.',
+      howToUse: 'Sign in with mobile OTP, select ward/location, and track civic requests in real time.',
+      iconUrl: '',
+      iconKey: 'building-2',
+      packageName: 'in.gov.imc.indore311',
+      playStoreUrl: 'https://play.google.com/store/apps/details?id=in.gov.imc.indore311',
+      websiteUrl: 'https://imcindore.mp.gov.in',
+      sortOrder: 1,
+    },
+    {
+      id: 'chalo_aictsl_app',
+      cityId: 'indore',
+      docType: 'app_guide',
+      appName: 'Chalo — iBus & City Bus',
+      taskCategory: 'Metro & Bus',
+      highlightTag: 'Live Tracking',
+      description: 'Track Indore BRTS iBus and AiCTSL city buses live with route timings and digital passes.',
+      howToUse: 'Search your origin and destination bus stops to see live ETA and bus occupancy.',
+      iconUrl: '',
+      iconKey: 'bus',
+      packageName: 'app.zophop',
+      playStoreUrl: 'https://play.google.com/store/apps/details?id=app.zophop',
+      websiteUrl: 'https://chalo.com',
+      sortOrder: 2,
     },
   ];
 
-  const jaipurItems: Array<PlaceDoc | ServiceDoc> = [
+  const jaipurItems: Array<PlaceDoc | ServiceDoc | AppGuideDoc> = [
     {
       id: 'amber_fort',
       cityId: 'jaipur',
@@ -358,12 +462,37 @@ export function createInitialSeedData(): SeedDatabaseState {
       cityId: 'jaipur',
       docType: 'service',
       group: 'TRANSPORT',
-      name: 'Badi Chaupar Metro Station',
+      serviceMode: 'CONTACT',
+      category: 'Contact',
+      name: 'Badi Chaupar Metro Helpline',
       subtitle: 'Underground Pink Line station inside the Walled City',
+      description: 'Metro commuter assistance and lost & found helpdesk.',
+      address: 'Badi Chaupar, Pink City, Jaipur, RJ 302002',
       distanceOrHours: '6:20 AM – 10:00 PM',
+      highlightNumber: '0141-2822100',
+      phone: '+91 141 282 2100',
+      actionUrl: '',
+      isUrgent: false,
+      iconKey: 'train',
+      sortOrder: 1,
       latitude: 26.9231,
       longitude: 75.8271,
-      phone: '+91 141 282 2100',
+    },
+    {
+      id: 'jaipur_metro_app',
+      cityId: 'jaipur',
+      docType: 'app_guide',
+      appName: 'JMRC Jaipur Metro',
+      taskCategory: 'Metro & Bus',
+      highlightTag: 'Official',
+      description: 'Official Jaipur Metro Rail app with route planner, fare calculator, and station timings.',
+      howToUse: 'Select Mansarovar to Badi Chaupar stations to check fares and next train departure.',
+      iconUrl: '',
+      iconKey: 'train',
+      packageName: 'com.jaipurmetro.app',
+      playStoreUrl: 'https://play.google.com/store/apps/details?id=com.jaipurmetro.app',
+      websiteUrl: 'https://transport.rajasthan.gov.in/jmrc',
+      sortOrder: 1,
     },
   ];
 
@@ -439,11 +568,13 @@ export function createInitialSeedData(): SeedDatabaseState {
   return {
     cities: [indoreCities, jaipurCity],
     categories: [...indoreCategories, ...jaipurCategories],
+    mapCategories: [],
     cityCollections: {
       city_indore: indoreItems,
       city_jaipur: jaipurItems,
     },
     trips,
     tips,
+    subAdmins: [],
   };
 }

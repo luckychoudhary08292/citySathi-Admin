@@ -18,6 +18,8 @@ export type PlaceCategoryKey =
 
 export type ServiceGroupKey = 'TRANSPORT' | 'COLLEGES' | 'PHARMACY' | 'EMERGENCY';
 
+export type ServiceMode = 'CONTACT' | 'SERVICE_NAME';
+
 export interface PromoBanner {
   id: string;
   badgeText: string;
@@ -37,7 +39,7 @@ export interface CityDoc {
   heroImageUrl: string;
   collectionName: string;
   heroSubtitle: string;
-  promoBanner: PromoBanner;
+  promoBanner: PromoBanner | null;
 }
 
 export interface CategoryDoc {
@@ -76,13 +78,67 @@ export interface ServiceDoc {
   cityId: string;
   docType: 'service';
   group: ServiceGroupKey;
+  serviceMode: ServiceMode;
+  category: string;
   name: string;
   subtitle: string;
+  description: string;
+  address: string;
   distanceOrHours: string;
+  highlightNumber: string;
+  phone: string;
+  actionUrl: string;
+  isUrgent: boolean;
+  iconKey: string;
+  sortOrder: number;
   latitude: number;
   longitude: number;
-  phone: string;
 }
+
+export interface MapCategoryDoc {
+  id: string;
+  cityId: string;
+  name: string;
+  sortOrder: number;
+}
+
+export interface HealthStatus {
+  ok: boolean;
+  dbMode: 'mongodb' | 'local';
+}
+
+export interface MapConfigStatus {
+  configured: boolean;
+  maskedKey: string;
+  defaultZoom: number;
+}
+
+export interface CityMapVerification {
+  city: CityDoc;
+  places: PlaceDoc[];
+  services: ServiceDoc[];
+  mapSubCategories: string[];
+  usingFallback: boolean;
+}
+
+export interface AppGuideDoc {
+  id: string;
+  cityId: string;
+  docType: 'app_guide';
+  appName: string;
+  taskCategory: string;
+  highlightTag: string;
+  description: string;
+  howToUse: string;
+  iconUrl: string;
+  iconKey: string;
+  packageName: string;
+  playStoreUrl: string;
+  websiteUrl: string;
+  sortOrder: number;
+}
+
+export type TripStatus = 'UPCOMING' | 'ONGOING' | 'COMPLETED';
 
 export interface TripDoc {
   id: string;
@@ -93,7 +149,7 @@ export interface TripDoc {
   placeIds: string[];
   completedPlaceIds: string[];
   startDateMillis: number;
-  status: 'UPCOMING' | 'COMPLETED';
+  status: TripStatus;
   createdAt: number | string;
 }
 
@@ -175,9 +231,65 @@ export const SERVICE_GROUPS: ReadonlyArray<{ value: ServiceGroupKey; label: stri
   { value: 'EMERGENCY', label: 'Emergency' },
 ];
 
+export const SERVICE_CONTACT_CATEGORIES = ['Contact', 'Emergency', 'Helpline'] as const;
+
+export const SERVICE_SHORTCUT_CATEGORIES = [
+  'Service Name',
+  'Hospital',
+  'Pharmacy',
+  'ATM',
+  'Transport',
+  'Food',
+  'Emergency',
+] as const;
+
+export const SERVICE_ICON_KEYS = [
+  { value: 'phone', label: 'Phone / Helpline' },
+  { value: 'ambulance', label: 'Ambulance / Medical' },
+  { value: 'shield-alert', label: 'Emergency / Police' },
+  { value: 'hospital', label: 'Hospital' },
+  { value: 'pill', label: 'Pharmacy' },
+  { value: 'banknote', label: 'ATM / Banking' },
+  { value: 'train', label: 'Train / Metro' },
+  { value: 'bus', label: 'Bus / Transit' },
+  { value: 'utensils', label: 'Food' },
+  { value: 'graduation-cap', label: 'College / University' },
+  { value: 'building-2', label: 'Civic Office' },
+] as const;
+
+export const APP_TASK_CATEGORIES = [
+  'Metro & Bus',
+  'Cab Booking',
+  'Food Delivery',
+  'Civic Help',
+  'Healthcare & Pharmacy',
+  'Local Events & Tickets',
+] as const;
+
 export const PROMO_TARGET_ROUTES: ReadonlyArray<{ value: PromoTargetRoute; label: string }> = [
   { value: 'explore', label: 'Explore Feed' },
   { value: 'plan_trip', label: 'Plan Trip' },
   { value: 'map', label: 'Interactive Map' },
   { value: 'services', label: 'City Services' },
 ];
+
+export type AdminRole = 'SUPER_ADMIN' | 'SUB_ADMIN';
+
+export interface SubAdminPublicDoc {
+  id: string;
+  name: string;
+  email: string;
+  allowedCityIds: string[];
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AdminSessionUser {
+  role: AdminRole;
+  email: string;
+  name: string;
+  allowedCityIds: string[];
+  dbMode: 'mongodb' | 'local';
+}
+

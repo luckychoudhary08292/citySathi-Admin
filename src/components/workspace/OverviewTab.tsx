@@ -6,16 +6,26 @@ import {
   LayoutTemplate,
   MapPin,
   Route,
+  Smartphone,
   Star,
 } from 'lucide-react';
-import type { CategoryDoc, CityDoc, PlaceDoc, ServiceDoc, TripDoc } from '../../types.ts';
+import type {
+  AppGuideDoc,
+  CategoryDoc,
+  CityDoc,
+  PlaceDoc,
+  ServiceDoc,
+  TripDoc,
+} from '../../types.ts';
 import { SafeImage } from '../SafeImage.tsx';
 
 export type OverviewTargetTab =
   | 'home'
   | 'places'
   | 'categories'
+  | 'map-categories'
   | 'services'
+  | 'app-guides'
   | 'inspector';
 
 interface OverviewTabProps {
@@ -23,6 +33,7 @@ interface OverviewTabProps {
   categories: CategoryDoc[];
   places: PlaceDoc[];
   services: ServiceDoc[];
+  appGuides: AppGuideDoc[];
   trips: TripDoc[];
   onNavigate: (tab: OverviewTargetTab) => void;
   onEditCityMeta: () => void;
@@ -33,6 +44,7 @@ export function OverviewTab({
   categories,
   places,
   services,
+  appGuides,
   trips,
   onNavigate,
   onEditCityMeta,
@@ -41,8 +53,11 @@ export function OverviewTab({
     (sum, cat) => sum + cat.subCategories.length,
     0
   );
-  const activeTripsCount = trips.filter((t) => t.status === 'UPCOMING').length;
+  const activeTripsCount = trips.filter(
+    (t) => t.status === 'UPCOMING' || t.status === 'ONGOING'
+  ).length;
   const popularPlaces = places.filter((p) => p.isPopular);
+  const resolvedHeroSubtitle = (city.heroSubtitle || '').replace(/\{city\}/gi, city.name);
 
   const kpis = [
     {
@@ -53,16 +68,16 @@ export function OverviewTab({
       target: 'places' as OverviewTargetTab,
     },
     {
-      label: 'Dynamic Subcategories',
+      label: 'Explore Subcategories',
       value: totalSubCategories,
       helper: `Across ${categories.length} fixed categories`,
       icon: FolderTree,
       target: 'categories' as OverviewTargetTab,
     },
     {
-      label: 'City Services',
-      value: services.length,
-      helper: 'Transport, Colleges, Pharmacy, Emergency',
+      label: 'City Hub Services & Apps',
+      value: services.length + appGuides.length,
+      helper: `${services.length} services · ${appGuides.length} app guides`,
       icon: Building2,
       target: 'services' as OverviewTargetTab,
     },
@@ -126,7 +141,7 @@ export function OverviewTab({
 
           <div className="p-5 space-y-4">
             <p className="text-sm text-slate-600 leading-relaxed">
-              {city.heroSubtitle || 'Configure a home screen subtitle in City Home & Banner.'}
+              {resolvedHeroSubtitle || 'Configure a home screen subtitle in City Home & Banner.'}
             </p>
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 text-xs">
@@ -139,22 +154,38 @@ export function OverviewTab({
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 pt-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => onNavigate('home')}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
               >
                 <LayoutTemplate className="w-3.5 h-3.5 text-[#0284C7]" />
-                Edit Home Banner
+                Banner
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('map-categories')}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                <MapPin className="w-3.5 h-3.5 text-[#0284C7]" />
+                Map Chips
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('app-guides')}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-[#0284C7]" />
+                App Guide
               </button>
               <button
                 type="button"
                 onClick={onEditCityMeta}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
               >
                 <MapPin className="w-3.5 h-3.5 text-[#0284C7]" />
-                City Coordinates
+                Coords
               </button>
             </div>
           </div>

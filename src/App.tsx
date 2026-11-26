@@ -7,14 +7,13 @@ import { ToastContainer } from './components/Toast.tsx';
 import type { ToastItem } from './components/Toast.tsx';
 import { api, clearAuthCredentials } from './lib/api.ts';
 import type { AuthStatusResponse } from './lib/api.ts';
-import type { CityDoc } from './types.ts';
+import type { AdminSessionUser, CityDoc } from './types.ts';
 
 export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [sessionUser, setSessionUser] = useState<{ email: string; dbMode: 'mongodb' | 'local' } | null>(
-    null
-  );
+  const [sessionUser, setSessionUser] = useState<AdminSessionUser | null>(null);
+  const isSuperAdmin = sessionUser?.role === 'SUPER_ADMIN';
 
   const [cities, setCities] = useState<CityDoc[]>([]);
   const [loadingCities, setLoadingCities] = useState(false);
@@ -59,8 +58,9 @@ export default function App() {
     setLoadingCities(true);
     try {
       const res = await api.listCities();
-      setCities(res.cities);
-      setSelectedCityId((prev) => prev ?? res.cities[0]?.id ?? null);
+      const cityList = Array.isArray(res?.cities) ? res.cities : [];
+      setCities(cityList);
+      setSelectedCityId((prev) => prev ?? cityList[0]?.id ?? null);
     } catch (err) {
       pushToast('error', (err as Error).message);
     } finally {
@@ -84,16 +84,19 @@ export default function App() {
   };
 
   const handleConfirmDeleteCity = async () => {
-    if (!deletingCity) return;
+    if (!deletingCity || !isSuperAdmin) return;
     setDeletingCityBusy(true);
     try {
-      await api.deleteCity(deletingCity.id);
-      const remaining = cities.filter((c) => c.id !== deletingCity.id);
-      setCities(remaining);
-      if (selectedCityId === deletingCity.id) {
-        setSelectedCityId(remaining[0]?.id ?? null);
+      const removedName = deletingCity.name;
+      const removedId = deletingCity.id;
+      await api.deleteCity(removedId);
+      const res = await api.listCities();
+      const cityList = Array.isArray(res?.cities) ? res.cities : [];
+      setCities(cityList);
+      if (selectedCityId === removedId) {
+        setSelectedCityId(cityList[0]?.id ?? null);
       }
-      pushToast('success', `Deleted city "${deletingCity.name}" and ${deletingCity.collectionName}`);
+      pushToast('success', `Deleted "${removedName}" — Saved & synced live to app`);
       setDeletingCity(null);
     } catch (err) {
       pushToast('error', (err as Error).message);
@@ -131,13 +134,11 @@ export default function App() {
         cities={cities}
         selectedCity={selectedCity}
         loadingCities={loadingCities}
-        dbMode={sessionUser.dbMode}
-        userEmail={sessionUser.email}
+        sessionUser={sessionUser}
         onSelectCity={(c) => setSelectedCityId(c.id)}
-        onCityUpdated={(updated) =>
-          setCities((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
-        }
+        onCitiesRefresh={loadCities}
         onAddCity={() => {
+          if (!isSuperAdmin) return;
           setEditingCity(null);
           setCityModalOpen(true);
         }}
@@ -145,30 +146,26 @@ export default function App() {
           setEditingCity(c);
           setCityModalOpen(true);
         }}
-        onDeleteCity={(c) => setDeletingCity(c)}
+        onDeleteCity={(c) => {
+          if (!isSuperAdmin) return;
+          setDeletingCity(c);
+        }}
         onLogout={handleLogout}
         onToast={pushToast}
       />
 
-      {cityModalOpen && (
+      {cityModalOpen && (isSuperAdmin || Boolean(editingCity)) && (
         <CityModal
           open={cityModalOpen}
           city={editingCity}
           onClose={() => setCityModalOpen(false)}
           onSaved={(saved, isNew) => {
-            if (isNew) {
-              setCities((prev) =>
-                [...prev, saved].sort((a, b) => a.name.localeCompare(b.name))
-              );
-              setSelectedCityId(saved.id);
-              pushToast(
-                'success',
-                `Created "${saved.name}" with ${saved.collectionName} & 6 fixed categories`
-              );
-            } else {
-              setCities((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
-              pushToast('success', `Changes saved to ${saved.name}`);
-            }
+            void loadCities().then(() => {
+              if (isNew) {
+                setSelectedCityId(saved.id);
+              }
+              pushToast('success', `"${saved.name}" — Saved & synced live to app`);
+            });
             setCityModalOpen(false);
           }}
           onError={(msg) => pushToast('error', msg)}

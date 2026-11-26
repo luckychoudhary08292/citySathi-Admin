@@ -7,6 +7,7 @@ import {
   MapPin,
   Plus,
   Search,
+  ShieldCheck,
   Trash2,
 } from 'lucide-react';
 import type { CityDoc } from '../types.ts';
@@ -16,6 +17,7 @@ interface CityHubProps {
   cities: CityDoc[];
   selectedCityId: string | null;
   loading: boolean;
+  isSuperAdmin: boolean;
   onSelectCity: (city: CityDoc) => void;
   onAddCity: () => void;
   onEditCity: (city: CityDoc) => void;
@@ -26,6 +28,7 @@ export function CityHub({
   cities,
   selectedCityId,
   loading,
+  isSuperAdmin,
   onSelectCity,
   onAddCity,
   onEditCity,
@@ -49,21 +52,34 @@ export function CityHub({
       {/* Header & Filter Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">Cities Registry</h2>
+          <h2 className="text-xl font-bold tracking-tight text-slate-900">
+            {isSuperAdmin ? 'Cities Registry' : 'Assigned Cities'}
+          </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Select a city to scope the workspace to its personal collection and category rules.
+            Select a city to scope the workspace to its collection, places, services, and map categories.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onAddCity}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#0284C7] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0369A1] transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/30"
-        >
-          <Plus className="w-4 h-4" />
-          Add City
-        </button>
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={onAddCity}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#0284C7] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0369A1] transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/30"
+          >
+            <Plus className="w-4 h-4" />
+            Add City
+          </button>
+        )}
       </div>
+
+      {!isSuperAdmin && (
+        <div className="rounded-xl border border-sky-200 bg-[#E0F2FE]/50 px-4 py-3 flex items-start gap-3 text-xs text-sky-950">
+          <ShieldCheck className="w-4 h-4 text-[#0284C7] shrink-0 mt-0.5" />
+          <span>
+            Sub-Admin scope active: you have full content management permissions inside your assigned {cities.length === 1 ? 'city' : 'cities'}. Creating or deleting cities and managing admins are restricted to the Supreme Admin.
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="relative w-full sm:max-w-sm">
@@ -130,21 +146,29 @@ export function CityHub({
             <MapPin className="w-6 h-6" />
           </div>
           <h3 className="text-base font-semibold text-slate-900">
-            {cities.length === 0 ? 'No cities configured yet' : 'No cities match your search'}
+            {cities.length === 0
+              ? isSuperAdmin
+                ? 'No cities configured yet'
+                : 'No cities assigned to your account'
+              : 'No cities match your search'}
           </h3>
           <p className="mt-1 text-sm text-slate-500 max-w-md mx-auto">
             {cities.length === 0
-              ? 'Create your first city to initialize its dedicated MongoDB collection and 6 fixed categories.'
-              : 'Try adjusting your search query or register a new city.'}
+              ? isSuperAdmin
+                ? 'Create your first city to initialize its dedicated MongoDB collection and 6 fixed categories.'
+                : 'Contact the Supreme Admin to assign one or more cities to your Sub-Admin account.'
+              : 'Try adjusting your search query.'}
           </p>
-          <button
-            type="button"
-            onClick={onAddCity}
-            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[#0284C7] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0369A1] transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Add First City
-          </button>
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={onAddCity}
+              className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[#0284C7] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0369A1] transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add First City
+            </button>
+          )}
         </div>
       ) : viewMode === 'table' ? (
         <div className="surface-card overflow-hidden">
@@ -216,14 +240,16 @@ export function CityHub({
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteCity(city)}
-                            className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors"
-                            aria-label={`Delete ${city.name}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {isSuperAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteCity(city)}
+                              className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                              aria-label={`Delete ${city.name}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -308,15 +334,17 @@ export function CityHub({
                       >
                         <Edit3 className="w-4 h-4" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteCity(city)}
-                        className="rounded-lg p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors"
-                        title={`Delete ${city.name}`}
-                        aria-label={`Delete ${city.name}`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {isSuperAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteCity(city)}
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                          title={`Delete ${city.name}`}
+                          aria-label={`Delete ${city.name}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

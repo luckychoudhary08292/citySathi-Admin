@@ -6,6 +6,8 @@ import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import type {
+  AdminRole,
+  AppGuideDoc,
   CityDoc,
   GeocodeResult,
   PlaceCategoryKey,
@@ -14,10 +16,12 @@ import type {
   PromoTargetRoute,
   ServiceDoc,
   ServiceGroupKey,
+  ServiceMode,
   TopCategoryKey,
 } from './src/types.ts';
 import { FIXED_CATEGORIES, PLACE_CATEGORIES, PROMO_TARGET_ROUTES, SERVICE_GROUPS } from './src/types.ts';
 import { store } from './server/db.ts';
+import type { SubAdminRecord } from './server/seed.ts';
 
 dotenv.config();
 
@@ -151,6 +155,27 @@ function sanitizeImageUrl(raw: unknown): string {
   return '';
 }
 
+function sanitizeHttpUrl(raw: unknown): string {
+  const url = asString(raw);
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return url;
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+function maskApiKey(rawKey: string): string {
+  const key = rawKey.trim();
+  if (!key) return '';
+  if (key.length <= 8) return `${key.slice(0, 2)}••••`;
+  return `${key.slice(0, 4)}••••${key.slice(-4)}`;
+}
+
 function validatePromoBanner(raw: unknown, cityId: string, fallback?: PromoBanner): PromoBanner {
   const obj = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
   const routeRaw = asString(obj.targetRoute, fallback?.targetRoute ?? 'explore');
@@ -242,7 +267,7 @@ function validatePlacePayload(
 
 function validateServicePayload(
   raw: unknown,
-  cityId: string,
+  city: CityDoc,
   requireSlugId = true
 ): { ok: true; data: ServiceDoc } | { ok: false; error: string } {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -262,32 +287,169 @@ function validateServicePayload(
     return { ok: false, error: 'Service id must be a non-empty string' };
   }
 
+  const rawMode = asString(obj.serviceMode, 'CONTACT').toUpperCase();
+  const serviceMode: ServiceMode = rawMode === 'SERVICE_NAME' ? 'SERVICE_NAME' : 'CONTACT';
+
   const groupRaw = asString(obj.group, 'TRANSPORT').toUpperCase();
   if (!VALID_SERVICE_GROUPS.has(groupRaw)) {
     return { ok: false, error: `Invalid service group: ${groupRaw}` };
   }
 
-  const lat = asNumber(obj.latitude);
-  const lng = asNumber(obj.longitude);
+  const latRaw = asNumber(obj.latitude);
+  const lngRaw = asNumber(obj.longitude);
+  const lat = latRaw !== null ? latRaw : city.latitude;
+  const lng = lngRaw !== null ? lngRaw : city.longitude;
   if (!isValidLatLng(lat, lng)) {
     return { ok: false, error: 'Valid latitude (-90..90) and longitude (-180..180) are required' };
+  }
+
+  const sortOrderRaw = asNumber(obj.sortOrder);
+  const sortOrder = sortOrderRaw !== null ? Math.round(sortOrderRaw) : 0;
+
+  const defaultCat =
+    serviceMode === 'SERVICE_NAME'
+      ? 'Service Name'
+      : groupRaw === 'EMERGENCY'
+        ? 'Emergency'
+        : 'Contact';
+  const category = asString(obj.category, defaultCat) || defaultCat;
+  const phone = asString(obj.phone) || asString(obj.contactNumber);
+  const highlightNumber =
+    serviceMode === 'SERVICE_NAME'
+      ? asString(obj.highlightNumber)
+      : asString(obj.highlightNumber, phone);
+  const actionUrlRaw = asString(obj.actionUrl);
+  const actionUrl = actionUrlRaw ? sanitizeHttpUrl(actionUrlRaw) : '';
+  if (actionUrlRaw && !actionUrl) {
+    return { ok: false, error: 'actionUrl must be a valid http/https URL' };
   }
 
   return {
     ok: true,
     data: {
       id,
-      cityId,
+      cityId: city.id,
       docType: 'service',
       group: groupRaw as ServiceGroupKey,
+      serviceMode,
+      category,
       name,
       subtitle: asString(obj.subtitle),
+      description: asString(obj.description),
+      address: asString(obj.address),
       distanceOrHours: asString(obj.distanceOrHours),
-      latitude: lat!,
-      longitude: lng!,
-      phone: asString(obj.phone),
+      highlightNumber,
+      phone,
+      actionUrl,
+      isUrgent: Boolean(obj.isUrgent),
+      iconKey: asString(obj.iconKey, 'phone') || 'phone',
+      sortOrder,
+      latitude: lat,
+      longitude: lng,
     },
   };
+}
+
+function validateAppGuidePayload(
+  raw: unknown,
+  cityId: string,
+  requireSlugId = true
+): { ok: true; data: AppGuideDoc } | { ok: false; error: string } {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { ok: false, error: 'Invalid app guide payload object' };
+  }
+  const obj = raw as Record<string, unknown>;
+  const appName = asString(obj.appName);
+  if (!appName) return { ok: false, error: 'App name is required' };
+
+  const id = requireSlugId
+    ? sanitizeSlug(obj.id || appName)
+    : asString(obj.id) || sanitizeSlug(appName);
+  if (requireSlugId && (!id || !SLUG_REGEX.test(id))) {
+    return { ok: false, error: 'App Guide id must be a valid lowercase slug' };
+  }
+  if (!requireSlugId && !id) {
+    return { ok: false, error: 'App Guide id must be a non-empty string' };
+  }
+
+  const iconUrlRaw = asString(obj.iconUrl);
+  const iconUrl = iconUrlRaw ? sanitizeImageUrl(iconUrlRaw) : '';
+  if (iconUrlRaw && !iconUrl) {
+    return { ok: false, error: 'iconUrl must be an http/https URL or valid asset path' };
+  }
+
+  const playStoreRaw = asString(obj.playStoreUrl);
+  const playStoreUrl = playStoreRaw ? sanitizeImageUrl(playStoreRaw) : '';
+  if (playStoreRaw && !playStoreUrl) {
+    return { ok: false, error: 'playStoreUrl must be a valid http/https URL' };
+  }
+
+  const websiteRaw = asString(obj.websiteUrl);
+  const websiteUrl = websiteRaw ? sanitizeImageUrl(websiteRaw) : '';
+  if (websiteRaw && !websiteUrl) {
+    return { ok: false, error: 'websiteUrl must be a valid http/https URL' };
+  }
+
+  const sortOrderRaw = asNumber(obj.sortOrder);
+  const sortOrder = sortOrderRaw !== null ? Math.round(sortOrderRaw) : 0;
+
+  return {
+    ok: true,
+    data: {
+      id,
+      cityId,
+      docType: 'app_guide',
+      appName,
+      taskCategory: asString(obj.taskCategory, 'Civic Help') || 'Civic Help',
+      highlightTag: asString(obj.highlightTag),
+      description: asString(obj.description),
+      howToUse: asString(obj.howToUse),
+      iconUrl,
+      iconKey: asString(obj.iconKey, 'smartphone') || 'smartphone',
+      packageName: asString(obj.packageName),
+      playStoreUrl,
+      websiteUrl,
+      sortOrder,
+    },
+  };
+}
+
+interface AdminAuthContext {
+  role: AdminRole;
+  email: string;
+  name: string;
+  subAdminId?: string;
+  allowedCityIds: string[];
+}
+
+const authContextMap = new WeakMap<Request, AdminAuthContext>();
+
+function getAuthContext(req: Request): AdminAuthContext | null {
+  return authContextMap.get(req) ?? null;
+}
+
+function hasCityAccess(req: Request, cityId: string): boolean {
+  const auth = getAuthContext(req);
+  if (!auth) return false;
+  if (auth.role === 'SUPER_ADMIN') return true;
+  return Boolean(cityId && auth.allowedCityIds.includes(cityId));
+}
+
+function assertCityAccess(req: Request, res: Response, cityId: string): boolean {
+  if (!hasCityAccess(req, cityId)) {
+    res.status(403).json({ error: 'Access denied: you are not assigned to this city' });
+    return false;
+  }
+  return true;
+}
+
+function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
+  const auth = getAuthContext(req);
+  if (!auth || auth.role !== 'SUPER_ADMIN') {
+    res.status(403).json({ error: 'Access denied: Supreme Admin privileges required' });
+    return;
+  }
+  next();
 }
 
 async function getAuthConfigurationState() {
@@ -313,6 +475,12 @@ async function requireAdminAuth(req: Request, res: Response, next: NextFunction)
   const config = await getAuthConfigurationState();
 
   if (adminKeyHeader && config.envSecret && timingSafeStringEqual(adminKeyHeader, config.envSecret)) {
+    authContextMap.set(req, {
+      role: 'SUPER_ADMIN',
+      email: 'API Key Admin',
+      name: 'Supreme Admin',
+      allowedCityIds: [],
+    });
     next();
     return;
   }
@@ -320,8 +488,38 @@ async function requireAdminAuth(req: Request, res: Response, next: NextFunction)
   if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
     const token = authHeader.slice(7).trim();
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as { role?: string };
-      if (payload && payload.role === 'admin') {
+      const payload = jwt.verify(token, JWT_SECRET) as {
+        role?: string;
+        email?: string;
+        subAdminId?: string;
+      };
+      if (payload && (payload.role === 'SUPER_ADMIN' || payload.role === 'admin')) {
+        authContextMap.set(req, {
+          role: 'SUPER_ADMIN',
+          email: payload.email || 'Supreme Admin',
+          name: 'Supreme Admin',
+          allowedCityIds: [],
+        });
+        next();
+        return;
+      }
+      if (payload && payload.role === 'SUB_ADMIN' && typeof payload.subAdminId === 'string') {
+        const subAdmin = await store.getSubAdminAuthById(payload.subAdminId);
+        if (!subAdmin) {
+          res.status(401).json({ error: 'Sub-admin account no longer exists' });
+          return;
+        }
+        if (!subAdmin.isActive) {
+          res.status(403).json({ error: 'Your sub-admin access has been disabled by the Supreme Admin' });
+          return;
+        }
+        authContextMap.set(req, {
+          role: 'SUB_ADMIN',
+          subAdminId: subAdmin.id,
+          email: subAdmin.email,
+          name: subAdmin.name,
+          allowedCityIds: subAdmin.allowedCityIds,
+        });
         next();
         return;
       }
@@ -337,6 +535,33 @@ async function requireAdminAuth(req: Request, res: Response, next: NextFunction)
 async function startServer(): Promise<void> {
   await store.init();
   const app = express();
+  app.use((req, res, next) => {
+    const allowedRaw = process.env.ALLOWED_ORIGINS?.trim();
+    const origin = req.header('Origin');
+    if (allowedRaw) {
+      const allowedList = allowedRaw
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (origin && allowedList.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+      }
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+      if (origin) res.setHeader('Vary', 'Origin');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Admin-Key, Cache-Control'
+    );
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
   app.use(express.json({ limit: '2mb' }));
 
   // Public health & cities endpoint (Android app compatibility)
@@ -346,8 +571,155 @@ async function startServer(): Promise<void> {
 
   app.get('/api/v1/cities', async (_req, res) => {
     try {
+      res.setHeader('Cache-Control', 'no-store');
       const cities = await store.listCities();
       res.json({ cities });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/v1/categories', async (req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const cityId = sanitizeSlug(req.query.cityId);
+      if (cityId) {
+        const categories = await store.listCategories(cityId);
+        res.json({ categories });
+        return;
+      }
+      const cities = await store.listCities();
+      const all = await Promise.all(cities.map((c) => store.listCategories(c.id)));
+      res.json({ categories: all.flat() });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/v1/cities/:cityId/home', async (req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const cityId = sanitizeSlug(req.params.cityId);
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const places = await store.listPlaces(cityId);
+      res.json({
+        city,
+        cityName: city.name,
+        heroSubtitle: city.heroSubtitle,
+        headerImageUrl: city.heroImageUrl,
+        promoBanner: city.promoBanner ?? null,
+        popularPlaces: places.filter((p) => p.isPopular),
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/v1/cities/:cityId/explore', async (req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const cityId = sanitizeSlug(req.params.cityId);
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const [categories, places] = await Promise.all([
+        store.listCategories(cityId),
+        store.listPlaces(cityId),
+      ]);
+      res.json({ city, categories, places });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/v1/cities/:cityId/services', async (req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const cityId = sanitizeSlug(req.params.cityId);
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const services = await store.listServices(cityId);
+      res.json({ services });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/v1/cities/:cityId/apps', async (req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const cityId = sanitizeSlug(req.params.cityId);
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const apps = await store.listAppGuides(cityId);
+      res.json({ apps, appGuides: apps });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/v1/map/config', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const rawKey = process.env.MAPS_API_KEY?.trim() || '';
+    const zoomRaw = Number(process.env.MAP_DEFAULT_ZOOM || 13);
+    const defaultZoom = Number.isFinite(zoomRaw) && zoomRaw >= 1 && zoomRaw <= 22 ? zoomRaw : 13;
+    res.json({
+      configured: Boolean(rawKey),
+      maskedKey: maskApiKey(rawKey),
+      defaultZoom,
+    });
+  });
+
+  app.get('/api/v1/cities/:cityId/map', async (req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const cityId = sanitizeSlug(req.params.cityId);
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const [places, services, customMapCats] = await Promise.all([
+        store.listPlaces(cityId),
+        store.listServices(cityId),
+        store.listMapCategories(cityId),
+      ]);
+
+      const usingFallback = customMapCats.length === 0;
+      const mapSubCategories = usingFallback
+        ? Array.from(
+            new Set(
+              services
+                .filter((s) => s.serviceMode === 'SERVICE_NAME')
+                .map((s) => {
+                  const cat = s.category.trim();
+                  if (cat && cat.toLowerCase() !== 'service name') return cat;
+                  return s.name.trim();
+                })
+                .filter(Boolean)
+            )
+          )
+        : customMapCats.map((c) => c.name);
+
+      res.json({
+        city,
+        places,
+        services,
+        mapSubCategories,
+        usingFallback,
+      });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -395,8 +767,15 @@ async function startServer(): Promise<void> {
         res.status(403).json({ error: 'Admin account already claimed' });
         return;
       }
-      const token = jwt.sign({ role: 'admin', email }, JWT_SECRET, { expiresIn: '12h' });
-      res.status(201).json({ token, email, dbMode: store.getMode() });
+      const token = jwt.sign({ role: 'SUPER_ADMIN', email }, JWT_SECRET, { expiresIn: '12h' });
+      res.status(201).json({
+        token,
+        role: 'SUPER_ADMIN' as AdminRole,
+        email,
+        name: 'Supreme Admin',
+        allowedCityIds: [],
+        dbMode: store.getMode(),
+      });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -413,8 +792,17 @@ async function startServer(): Promise<void> {
       const adminKey = typeof req.body?.adminKey === 'string' ? req.body.adminKey.trim() : '';
       if (adminKey) {
         if (cfg.envSecret && timingSafeStringEqual(adminKey, cfg.envSecret)) {
-          const token = jwt.sign({ role: 'admin', authType: 'key' }, JWT_SECRET, { expiresIn: '12h' });
-          res.json({ token, email: 'API Key Admin', dbMode: store.getMode() });
+          const token = jwt.sign({ role: 'SUPER_ADMIN', authType: 'key' }, JWT_SECRET, {
+            expiresIn: '12h',
+          });
+          res.json({
+            token,
+            role: 'SUPER_ADMIN' as AdminRole,
+            email: 'API Key Admin',
+            name: 'Supreme Admin',
+            allowedCityIds: [],
+            dbMode: store.getMode(),
+          });
           return;
         }
         res.status(401).json({ error: 'Invalid ADMIN_SECRET key' });
@@ -428,7 +816,7 @@ async function startServer(): Promise<void> {
         return;
       }
 
-      // 1. Check configured env credentials (overrides claimed fallback)
+      // 1. Check configured env Supreme Admin credentials
       if (cfg.hasEnvAuth) {
         const envEmailMatch =
           email === cfg.envEmail.toLowerCase() || email === 'admin';
@@ -436,19 +824,65 @@ async function startServer(): Promise<void> {
           (cfg.envPassword && timingSafeStringEqual(password, cfg.envPassword)) ||
           (cfg.envSecret && timingSafeStringEqual(password, cfg.envSecret));
         if (envEmailMatch && envPassMatch) {
-          const token = jwt.sign({ role: 'admin', email }, JWT_SECRET, { expiresIn: '12h' });
-          res.json({ token, email, dbMode: store.getMode() });
+          const token = jwt.sign({ role: 'SUPER_ADMIN', email }, JWT_SECRET, { expiresIn: '12h' });
+          res.json({
+            token,
+            role: 'SUPER_ADMIN' as AdminRole,
+            email,
+            name: 'Supreme Admin',
+            allowedCityIds: [],
+            dbMode: store.getMode(),
+          });
           return;
         }
       }
 
-      // 2. Check claimed DB admin account when env password is not overriding
+      // 2. Check claimed DB Supreme Admin account when env password is not overriding
       if (!cfg.hasEnvAuth && cfg.dbAdmin) {
-        if (email === cfg.dbAdmin.email.toLowerCase() && verifyPasswordScrypt(password, cfg.dbAdmin.passwordHash)) {
-          const token = jwt.sign({ role: 'admin', email: cfg.dbAdmin.email }, JWT_SECRET, { expiresIn: '12h' });
-          res.json({ token, email: cfg.dbAdmin.email, dbMode: store.getMode() });
+        if (
+          email === cfg.dbAdmin.email.toLowerCase() &&
+          verifyPasswordScrypt(password, cfg.dbAdmin.passwordHash)
+        ) {
+          const token = jwt.sign(
+            { role: 'SUPER_ADMIN', email: cfg.dbAdmin.email },
+            JWT_SECRET,
+            { expiresIn: '12h' }
+          );
+          res.json({
+            token,
+            role: 'SUPER_ADMIN' as AdminRole,
+            email: cfg.dbAdmin.email,
+            name: 'Supreme Admin',
+            allowedCityIds: [],
+            dbMode: store.getMode(),
+          });
           return;
         }
+      }
+
+      // 3. Check City Sub-Admin accounts
+      const subAdmin = await store.getSubAdminAuthByEmail(email);
+      if (subAdmin && verifyPasswordScrypt(password, subAdmin.passwordHash)) {
+        if (!subAdmin.isActive) {
+          res
+            .status(403)
+            .json({ error: 'Your sub-admin account is disabled. Contact the Supreme Admin.' });
+          return;
+        }
+        const token = jwt.sign(
+          { role: 'SUB_ADMIN', subAdminId: subAdmin.id, email: subAdmin.email },
+          JWT_SECRET,
+          { expiresIn: '12h' }
+        );
+        res.json({
+          token,
+          role: 'SUB_ADMIN' as AdminRole,
+          email: subAdmin.email,
+          name: subAdmin.name,
+          allowedCityIds: subAdmin.allowedCityIds,
+          dbMode: store.getMode(),
+        });
+        return;
       }
 
       res.status(401).json({ error: 'Invalid credentials' });
@@ -459,10 +893,200 @@ async function startServer(): Promise<void> {
 
   // Protected Admin Router
   const admin = express.Router();
+  admin.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   admin.use(requireAdminAuth);
 
-  admin.get('/session', (_req, res) => {
-    res.json({ authenticated: true, dbMode: store.getMode() });
+  admin.get('/session', (req, res) => {
+    const auth = getAuthContext(req);
+    res.json({
+      authenticated: true,
+      role: auth?.role ?? 'SUB_ADMIN',
+      email: auth?.email ?? '',
+      name: auth?.name ?? '',
+      allowedCityIds: auth?.allowedCityIds ?? [],
+      dbMode: store.getMode(),
+    });
+  });
+
+  // Sub-Admin Management (Supreme Admin only)
+  admin.get('/sub-admins', requireSuperAdmin, async (_req, res) => {
+    try {
+      const subAdmins = await store.listSubAdmins();
+      res.json({ subAdmins });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  admin.post('/sub-admins', requireSuperAdmin, async (req, res) => {
+    try {
+      const rawName = asString(req.body?.name);
+      const email = asString(req.body?.email).toLowerCase();
+      const name = rawName || (email.includes('@') ? email.split('@')[0] : '');
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
+      const rawCityIds = asStringArray(req.body?.allowedCityIds).map((cid) => sanitizeSlug(cid)).filter(Boolean);
+      const isActive = req.body?.isActive !== undefined ? Boolean(req.body.isActive) : true;
+
+      if (!email || !email.includes('@')) {
+        res.status(400).json({ error: 'Valid sub-admin email is required' });
+        return;
+      }
+      if (!name) {
+        res.status(400).json({ error: 'Sub-admin name is required' });
+        return;
+      }
+      if (password.length < 8) {
+        res.status(400).json({ error: 'Password must be at least 8 characters' });
+        return;
+      }
+
+      const cfg = await getAuthConfigurationState();
+      if (
+        email === cfg.envEmail.toLowerCase() ||
+        (cfg.dbAdmin && email === cfg.dbAdmin.email.toLowerCase()) ||
+        email === 'admin'
+      ) {
+        res.status(409).json({ error: 'Cannot create a sub-admin using the Supreme Admin email' });
+        return;
+      }
+
+      const allCities = await store.listCities();
+      const validCitySet = new Set(allCities.map((c) => c.id));
+      const allowedCityIds = Array.from(new Set(rawCityIds.filter((cid) => validCitySet.has(cid))));
+      if (allowedCityIds.length === 0) {
+        res.status(400).json({ error: 'Assign at least one valid city to this sub-admin' });
+        return;
+      }
+
+      const now = Date.now();
+      const record: SubAdminRecord = {
+        id: `sa_${now.toString(36)}_${crypto.randomBytes(3).toString('hex')}`,
+        name,
+        email,
+        passwordHash: hashPasswordScrypt(password),
+        allowedCityIds,
+        isActive,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const created = await store.createSubAdmin(record);
+      res.status(201).json({ subAdmin: created });
+    } catch (err) {
+      const msg = (err as Error).message;
+      res.status(msg.includes('already exists') ? 409 : 500).json({ error: msg });
+    }
+  });
+
+  admin.put('/sub-admins/:subAdminId', requireSuperAdmin, async (req, res) => {
+    try {
+      const subAdminId = asString(req.params.subAdminId);
+      if (!subAdminId || subAdminId.includes('$')) {
+        res.status(400).json({ error: 'Invalid sub-admin id' });
+        return;
+      }
+      const existing = await store.getSubAdminAuthById(subAdminId);
+      if (!existing) {
+        res.status(404).json({ error: 'Sub-admin not found' });
+        return;
+      }
+
+      const patch: Partial<Pick<SubAdminRecord, 'name' | 'email' | 'passwordHash' | 'allowedCityIds' | 'isActive'>> = {};
+      if (req.body?.name !== undefined) {
+        const name = asString(req.body.name);
+        if (!name) {
+          res.status(400).json({ error: 'Sub-admin name cannot be empty' });
+          return;
+        }
+        patch.name = name;
+      }
+      if (req.body?.email !== undefined) {
+        const email = asString(req.body.email).toLowerCase();
+        if (!email || !email.includes('@')) {
+          res.status(400).json({ error: 'Valid sub-admin email is required' });
+          return;
+        }
+        const cfg = await getAuthConfigurationState();
+        if (
+          email === cfg.envEmail.toLowerCase() ||
+          (cfg.dbAdmin && email === cfg.dbAdmin.email.toLowerCase()) ||
+          email === 'admin'
+        ) {
+          res.status(409).json({ error: 'Cannot use the Supreme Admin email for a sub-admin' });
+          return;
+        }
+        patch.email = email;
+      }
+      if (typeof req.body?.password === 'string' && req.body.password.length > 0) {
+        if (req.body.password.length < 8) {
+          res.status(400).json({ error: 'New password must be at least 8 characters' });
+          return;
+        }
+        patch.passwordHash = hashPasswordScrypt(req.body.password);
+      }
+      if (req.body?.allowedCityIds !== undefined) {
+        const rawCityIds = asStringArray(req.body.allowedCityIds)
+          .map((cid) => sanitizeSlug(cid))
+          .filter(Boolean);
+        const allCities = await store.listCities();
+        const validCitySet = new Set(allCities.map((c) => c.id));
+        const allowedCityIds = Array.from(new Set(rawCityIds.filter((cid) => validCitySet.has(cid))));
+        if (allowedCityIds.length === 0) {
+          res.status(400).json({ error: 'Assign at least one valid city to this sub-admin' });
+          return;
+        }
+        patch.allowedCityIds = allowedCityIds;
+      }
+      if (req.body?.isActive !== undefined) {
+        patch.isActive = Boolean(req.body.isActive);
+      }
+
+      const updated = await store.updateSubAdmin(subAdminId, patch);
+      if (!updated) {
+        res.status(404).json({ error: 'Sub-admin not found' });
+        return;
+      }
+      res.json({ subAdmin: updated });
+    } catch (err) {
+      const msg = (err as Error).message;
+      res.status(msg.includes('already exists') ? 409 : 500).json({ error: msg });
+    }
+  });
+
+  admin.delete('/sub-admins/:subAdminId', requireSuperAdmin, async (req, res) => {
+    try {
+      const subAdminId = asString(req.params.subAdminId);
+      if (!subAdminId || subAdminId.includes('$')) {
+        res.status(400).json({ error: 'Invalid sub-admin id' });
+        return;
+      }
+      const deleted = await store.deleteSubAdmin(subAdminId);
+      if (!deleted) {
+        res.status(404).json({ error: 'Sub-admin not found' });
+        return;
+      }
+      res.json({ deleted: true, id: subAdminId });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Scoped Cities list for Admin Console
+  admin.get('/cities', async (req, res) => {
+    try {
+      const auth = getAuthContext(req);
+      const cities = await store.listCities();
+      if (auth?.role === 'SUB_ADMIN') {
+        const allowed = new Set(auth.allowedCityIds);
+        res.json({ cities: cities.filter((c) => allowed.has(c.id)) });
+        return;
+      }
+      res.json({ cities });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   // Server-side Nominatim Geocode & Reverse Geocode Proxy (auto-selecting location search)
@@ -582,8 +1206,8 @@ async function startServer(): Promise<void> {
     }
   });
 
-  // Cities CRUD
-  admin.post('/cities', async (req, res) => {
+  // Cities CRUD (Create/Delete restricted to Supreme Admin)
+  admin.post('/cities', requireSuperAdmin, async (req, res) => {
     try {
       const body = req.body as Record<string, unknown>;
       const name = asString(body.name);
@@ -634,6 +1258,7 @@ async function startServer(): Promise<void> {
   admin.put('/cities/:cityId', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const existing = await store.getCity(cityId);
       if (!existing) {
         res.status(404).json({ error: 'City not found' });
@@ -681,7 +1306,10 @@ async function startServer(): Promise<void> {
         patch.heroSubtitle = asString(body.heroSubtitle);
       }
       if (body.promoBanner !== undefined) {
-        patch.promoBanner = validatePromoBanner(body.promoBanner, cityId, existing.promoBanner);
+        patch.promoBanner =
+          body.promoBanner === null
+            ? null
+            : validatePromoBanner(body.promoBanner, cityId, existing.promoBanner ?? undefined);
       }
 
       const updated = await store.updateCity(cityId, patch);
@@ -700,7 +1328,7 @@ async function startServer(): Promise<void> {
     }
   });
 
-  admin.delete('/cities/:cityId', async (req, res) => {
+  admin.delete('/cities/:cityId', requireSuperAdmin, async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
       const deleted = await store.deleteCity(cityId);
@@ -715,10 +1343,133 @@ async function startServer(): Promise<void> {
     }
   });
 
+  // Per-City Custom Map Sub-Categories (map_categories collection)
+  admin.get('/cities/:cityId/map-categories', async (req, res) => {
+    try {
+      const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const mapCategories = await store.listMapCategories(cityId);
+      res.json({ mapCategories });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  admin.post('/cities/:cityId/map-categories', async (req, res) => {
+    try {
+      const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const name = asString(req.body?.name);
+      if (!name) {
+        res.status(400).json({ error: 'Map sub-category name is required' });
+        return;
+      }
+      const created = await store.createMapCategory(cityId, name);
+      void notifyAppBackend(cityId, 'map_categories');
+      res.status(201).json({ mapCategory: created });
+    } catch (err) {
+      const msg = (err as Error).message;
+      res
+        .status(msg.includes('already exists') ? 409 : msg.includes('cannot be empty') ? 400 : 500)
+        .json({ error: msg });
+    }
+  });
+
+  admin.put('/cities/:cityId/map-categories/reorder', async (req, res) => {
+    try {
+      const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const orderedIds = asStringArray(req.body?.orderedIds);
+      if (orderedIds.length === 0) {
+        res.status(400).json({ error: 'orderedIds array is required' });
+        return;
+      }
+      const mapCategories = await store.reorderMapCategories(cityId, orderedIds);
+      void notifyAppBackend(cityId, 'map_categories');
+      res.json({ mapCategories });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  admin.put('/cities/:cityId/map-categories/:catId', async (req, res) => {
+    try {
+      const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const catId = asString(req.params.catId);
+      if (!catId || catId.includes('$')) {
+        res.status(400).json({ error: 'Invalid map sub-category id' });
+        return;
+      }
+      const patch: { name?: string; sortOrder?: number } = {};
+      if (req.body?.name !== undefined) {
+        patch.name = asString(req.body.name);
+      }
+      if (req.body?.sortOrder !== undefined) {
+        const order = asNumber(req.body.sortOrder);
+        if (order !== null) patch.sortOrder = order;
+      }
+      const updated = await store.updateMapCategory(cityId, catId, patch);
+      if (!updated) {
+        res.status(404).json({ error: 'Map sub-category not found' });
+        return;
+      }
+      void notifyAppBackend(cityId, 'map_categories');
+      res.json({ mapCategory: updated });
+    } catch (err) {
+      const msg = (err as Error).message;
+      res
+        .status(msg.includes('already exists') ? 409 : msg.includes('cannot be empty') ? 400 : 500)
+        .json({ error: msg });
+    }
+  });
+
+  admin.delete('/cities/:cityId/map-categories/:catId', async (req, res) => {
+    try {
+      const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const catId = asString(req.params.catId);
+      if (!catId || catId.includes('$')) {
+        res.status(400).json({ error: 'Invalid map sub-category id' });
+        return;
+      }
+      const deleted = await store.deleteMapCategory(cityId, catId);
+      if (!deleted) {
+        res.status(404).json({ error: 'Map sub-category not found' });
+        return;
+      }
+      void notifyAppBackend(cityId, 'map_categories');
+      res.json({ deleted: true, id: catId });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // Categories
   admin.get('/categories/:cityId', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const city = await store.getCity(cityId);
       if (!city) {
         res.status(404).json({ error: 'City not found' });
@@ -734,6 +1485,7 @@ async function startServer(): Promise<void> {
   admin.put('/categories/:cityId/:category', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const category = asString(req.params.category).toUpperCase();
       if (!VALID_TOP_CATEGORIES.has(category)) {
         res.status(400).json({ error: 'Invalid fixed top-level category' });
@@ -761,6 +1513,7 @@ async function startServer(): Promise<void> {
   admin.get('/cities/:cityId/places', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const city = await store.getCity(cityId);
       if (!city) {
         res.status(404).json({ error: 'City not found' });
@@ -776,6 +1529,7 @@ async function startServer(): Promise<void> {
   admin.post('/cities/:cityId/places', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const city = await store.getCity(cityId);
       if (!city) {
         res.status(404).json({ error: 'City not found' });
@@ -798,6 +1552,7 @@ async function startServer(): Promise<void> {
   admin.post('/cities/:cityId/places/bulk', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const city = await store.getCity(cityId);
       if (!city) {
         res.status(404).json({ error: 'City not found' });
@@ -843,6 +1598,7 @@ async function startServer(): Promise<void> {
   admin.put('/cities/:cityId/places/:placeId', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const placeId = asString(req.params.placeId);
       if (!placeId || placeId.includes('$')) {
         res.status(400).json({ error: 'Invalid place id' });
@@ -871,6 +1627,7 @@ async function startServer(): Promise<void> {
   admin.delete('/cities/:cityId/places/:placeId', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const placeId = asString(req.params.placeId);
       if (!placeId || placeId.includes('$')) {
         res.status(400).json({ error: 'Invalid place id' });
@@ -892,6 +1649,7 @@ async function startServer(): Promise<void> {
   admin.get('/cities/:cityId/services', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const city = await store.getCity(cityId);
       if (!city) {
         res.status(404).json({ error: 'City not found' });
@@ -907,12 +1665,13 @@ async function startServer(): Promise<void> {
   admin.post('/cities/:cityId/services', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const city = await store.getCity(cityId);
       if (!city) {
         res.status(404).json({ error: 'City not found' });
         return;
       }
-      const validated = validateServicePayload(req.body, cityId, true);
+      const validated = validateServicePayload(req.body, city, true);
       if (!validated.ok) {
         res.status(400).json({ error: validated.error });
         return;
@@ -929,6 +1688,12 @@ async function startServer(): Promise<void> {
   admin.put('/cities/:cityId/services/:serviceId', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
       const serviceId = asString(req.params.serviceId);
       if (!serviceId || serviceId.includes('$')) {
         res.status(400).json({ error: 'Invalid service id' });
@@ -941,7 +1706,7 @@ async function startServer(): Promise<void> {
         return;
       }
       const merged = { ...existing, ...(req.body as Record<string, unknown>), id: existing.id };
-      const validated = validateServicePayload(merged, cityId, false);
+      const validated = validateServicePayload(merged, city, false);
       if (!validated.ok) {
         res.status(400).json({ error: validated.error });
         return;
@@ -957,6 +1722,7 @@ async function startServer(): Promise<void> {
   admin.delete('/cities/:cityId/services/:serviceId', async (req, res) => {
     try {
       const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
       const serviceId = asString(req.params.serviceId);
       if (!serviceId || serviceId.includes('$')) {
         res.status(400).json({ error: 'Invalid service id' });
@@ -974,15 +1740,116 @@ async function startServer(): Promise<void> {
     }
   });
 
+  // App Guides in city_<cityId>
+  admin.get('/cities/:cityId/app-guides', async (req, res) => {
+    try {
+      const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const appGuides = await store.listAppGuides(cityId);
+      res.json({ appGuides });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  admin.post('/cities/:cityId/app-guides', async (req, res) => {
+    try {
+      const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const validated = validateAppGuidePayload(req.body, cityId, true);
+      if (!validated.ok) {
+        res.status(400).json({ error: validated.error });
+        return;
+      }
+      const created = await store.createAppGuide(cityId, validated.data);
+      void notifyAppBackend(cityId, 'app_guides');
+      res.status(201).json({ appGuide: created });
+    } catch (err) {
+      const msg = (err as Error).message;
+      res.status(msg.includes('already exists') ? 409 : 500).json({ error: msg });
+    }
+  });
+
+  admin.put('/cities/:cityId/app-guides/:appId', async (req, res) => {
+    try {
+      const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const city = await store.getCity(cityId);
+      if (!city) {
+        res.status(404).json({ error: 'City not found' });
+        return;
+      }
+      const appId = asString(req.params.appId);
+      if (!appId || appId.includes('$')) {
+        res.status(400).json({ error: 'Invalid app guide id' });
+        return;
+      }
+      const existingList = await store.listAppGuides(cityId);
+      const existing = existingList.find((a) => a.id === appId);
+      if (!existing) {
+        res.status(404).json({ error: 'App guide entry not found' });
+        return;
+      }
+      const merged = { ...existing, ...(req.body as Record<string, unknown>), id: existing.id };
+      const validated = validateAppGuidePayload(merged, cityId, false);
+      if (!validated.ok) {
+        res.status(400).json({ error: validated.error });
+        return;
+      }
+      const updated = await store.updateAppGuide(cityId, appId, validated.data);
+      void notifyAppBackend(cityId, 'app_guides');
+      res.json({ appGuide: updated });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  admin.delete('/cities/:cityId/app-guides/:appId', async (req, res) => {
+    try {
+      const cityId = sanitizeSlug(req.params.cityId);
+      if (!assertCityAccess(req, res, cityId)) return;
+      const appId = asString(req.params.appId);
+      if (!appId || appId.includes('$')) {
+        res.status(400).json({ error: 'Invalid app guide id' });
+        return;
+      }
+      const deleted = await store.deleteAppGuide(cityId, appId);
+      if (!deleted) {
+        res.status(404).json({ error: 'App guide entry not found' });
+        return;
+      }
+      void notifyAppBackend(cityId, 'app_guides');
+      res.json({ deleted: true, appId });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // Trips & Tips moderation
   admin.get('/trips', async (req, res) => {
     try {
+      const auth = getAuthContext(req);
       const cityId = sanitizeSlug(req.query.cityId);
       const userId = asString(req.query.userId);
-      const trips = await store.listTrips({
+      if (cityId && !assertCityAccess(req, res, cityId)) return;
+      let trips = await store.listTrips({
         cityId: cityId || undefined,
         userId: userId || undefined,
       });
+      if (!cityId && auth?.role === 'SUB_ADMIN') {
+        const allowed = new Set(auth.allowedCityIds);
+        trips = trips.filter((t) => allowed.has(t.cityId));
+      }
       res.json({ trips });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -992,11 +1859,18 @@ async function startServer(): Promise<void> {
   admin.delete('/trips/:tripId', async (req, res) => {
     try {
       const tripId = asString(req.params.tripId);
+      const trip = await store.getTripById(tripId);
+      if (!trip) {
+        res.status(404).json({ error: 'Trip not found' });
+        return;
+      }
+      if (!assertCityAccess(req, res, trip.cityId)) return;
       const deleted = await store.deleteTrip(tripId);
       if (!deleted) {
         res.status(404).json({ error: 'Trip not found' });
         return;
       }
+      void notifyAppBackend(trip.cityId, 'trips');
       res.json({ deleted: true, tripId });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -1005,8 +1879,29 @@ async function startServer(): Promise<void> {
 
   admin.get('/tips', async (req, res) => {
     try {
+      const auth = getAuthContext(req);
       const cityId = sanitizeSlug(req.query.cityId);
-      const tips = await store.listTips(cityId || undefined);
+      if (cityId) {
+        if (!assertCityAccess(req, res, cityId)) return;
+        const tips = await store.listTips(cityId);
+        res.json({ tips });
+        return;
+      }
+      if (auth?.role === 'SUB_ADMIN') {
+        const perCity = await Promise.all(auth.allowedCityIds.map((cid) => store.listTips(cid)));
+        const uniqueMap = new Map<string, (typeof perCity)[number][number]>();
+        for (const list of perCity) {
+          for (const tip of list) {
+            uniqueMap.set(tip.id, tip);
+          }
+        }
+        const tips = Array.from(uniqueMap.values()).sort(
+          (a, b) => Number(b.timestamp) - Number(a.timestamp)
+        );
+        res.json({ tips });
+        return;
+      }
+      const tips = await store.listTips(undefined);
       res.json({ tips });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -1015,12 +1910,32 @@ async function startServer(): Promise<void> {
 
   admin.delete('/tips/:tipId', async (req, res) => {
     try {
+      const auth = getAuthContext(req);
       const tipId = asString(req.params.tipId);
+      const tip = await store.getTipById(tipId);
+      if (!tip) {
+        res.status(404).json({ error: 'Tip not found' });
+        return;
+      }
+      if (auth?.role === 'SUB_ADMIN') {
+        let permitted = Boolean(tip.cityId && auth.allowedCityIds.includes(tip.cityId));
+        if (!permitted && tip.placeId) {
+          const allowedPlaces = await Promise.all(
+            auth.allowedCityIds.map((cid) => store.listPlaces(cid))
+          );
+          permitted = allowedPlaces.some((list) => list.some((p) => p.id === tip.placeId));
+        }
+        if (!permitted) {
+          res.status(403).json({ error: 'Access denied: you are not assigned to this tip city' });
+          return;
+        }
+      }
       const deleted = await store.deleteTip(tipId);
       if (!deleted) {
         res.status(404).json({ error: 'Tip not found' });
         return;
       }
+      void notifyAppBackend(tip.cityId || '', 'tips');
       res.json({ deleted: true, tipId });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -1029,7 +1944,15 @@ async function startServer(): Promise<void> {
 
   // Manual full live-sync push endpoint
   const handleManualSyncApps = async (req: Request, res: Response) => {
+    const auth = getAuthContext(req);
     const cityId = req.body?.cityId ? sanitizeSlug(req.body.cityId) : '';
+    if (auth?.role === 'SUB_ADMIN') {
+      if (!cityId) {
+        res.status(403).json({ error: 'Sub-admins must specify an assigned city to sync' });
+        return;
+      }
+      if (!assertCityAccess(req, res, cityId)) return;
+    }
     await notifyAppBackend(cityId, 'all');
     res.json({ ok: true, cityId, scope: 'all' });
   };

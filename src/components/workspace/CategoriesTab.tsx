@@ -7,14 +7,14 @@ import { FIXED_CATEGORIES } from '../../types.ts';
 interface CategoriesTabProps {
   city: CityDoc;
   categories: CategoryDoc[];
-  onCategoryUpdated: (updated: CategoryDoc) => void;
+  onCategoriesChanged: (categories: CategoryDoc[]) => void;
   onToast: (type: 'success' | 'error', message: string) => void;
 }
 
 export function CategoriesTab({
   city,
   categories,
-  onCategoryUpdated,
+  onCategoriesChanged,
   onToast,
 }: CategoriesTabProps) {
   const [inputs, setInputs] = useState<Record<string, string>>({});
@@ -26,9 +26,10 @@ export function CategoriesTab({
   ) => {
     setSavingKey(categoryKey);
     try {
-      const res = await api.updateCategory(city.id, categoryKey, nextSubCategories);
-      onCategoryUpdated(res.category);
-      onToast('success', `Changes saved to ${city.name}`);
+      await api.updateCategory(city.id, categoryKey, nextSubCategories);
+      const fresh = await api.listCategories(city.id);
+      onCategoriesChanged(fresh.categories);
+      onToast('success', `${categoryKey} subcategories — Saved & synced live to app`);
     } catch (err) {
       onToast('error', (err as Error).message);
     } finally {
